@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '17 (15 Nov 2026)';
+var APP_VERSION = '18 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -675,13 +675,13 @@ function renderResults() {
     '<div class="kpi"><small>Peak hour factor</small><b>' + (pk.phf == null ? '–' : pk.phf.toFixed(2)) + '</b></div>' +
     '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' of ' + pk.vol + '</small></div>' : '';
 
-  var rows = A.bins.map(function (b, i) {
-    var inPk = pk && i >= pk.i && i < pk.i + 4;
-    return '<tr' + (inPk ? ' class="pk"' : '') + '><td>' + hhmm(b.start) + '–' + hhmm(b.start + BIN) + '</td><td>' + b.car + '</td><td>' + b.truck + '</td><td><b>' + b.veh + '</b></td><td>' + b.bike + '</td><td>' + b.ped + '</td></tr>';
-  }).join('');
-
   var nN = (S.notes || []).length;
   app.innerHTML =
+    '<div class="tbar">' +
+    (running ? '<button id="back"><i>←</i>Back to count</button>' : '<button id="resume"><i>▶</i>Resume count</button>') +
+    '<button id="notesres"><i>✎</i>Notes' + (nN ? ' (' + nN + ')' : '') + '</button>' +
+    '<button id="newcount"><i>＋</i>New count</button>' +
+    '<button id="hist"><i>☰</i>Past counts (' + H.length + ')</button></div>' +
     '<div class="page"><h1>' + esc(S.site || 'Untitled count') + '</h1>' +
     '<p class="hint">' + ymdw(S.startedAt) + (S.observer ? ' · ' + esc(S.observer) : '') + (S.weather ? ' · ' + esc(S.weather) : '') + '</p>' +
     warns.map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('') +
@@ -689,14 +689,7 @@ function renderResults() {
     '<button class="hb dark" id="pdfbtn">Summary PDF<small>Diagrams and tables</small></button>' +
     '<button class="hb dark" id="exp1">Excel<small>4 sheets</small></button>' +
     '<button class="hb dark" id="exp2">CSV<small>4 files</small></button></div>' +
-    '<div class="row">' + (running ? '<button class="ghost" id="back">← Back to counting</button>' : '<button class="ghost" id="resume">Resume count</button>') +
-    '<button class="ghost" id="notesres">Notes' + (nN ? ' (' + nN + ')' : '') + '</button>' +
-    '<button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div>' +
     '<div class="kpis">' + peakKpis + '</div>' +
-    '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Heavy vehicle</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
-    '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr>' +
-    (pk ? '<tr class="pkr"><td>Peak hour</td><td>' + (pk.vol - pk.truck) + '</td><td>' + pk.truck + '</td><td>' + pk.vol + '</td><td>' + pk.bike + '</td><td>' + pk.ped + '</td></tr>' : '') +
-    '</tfoot></table></div></div>' +
     matrixHTML(A, S) +
     previewHTML() +
     ((S.notes || []).length ? notesCardHTML(false) : '') + '</div>';
@@ -847,12 +840,18 @@ function tableRows(M, title, cols, fn, extras, peakRow) {
 function buildSheets() {
   var M = exportModel();
   var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? o[cls] : 0; }; };
-  var one = function (title, cols, cls) { return tableRows(M, title, cols, cell(cls), [{ h2: 'Total', fn: function (b) { var t = 0; cols.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }], false); };
+  var withApp = function (cols, cls) {   // adds an "Approach total" column after each leg group
+    var out = [], grp = [];
+    var flush = function () { if (!grp.length) return; var g = grp.slice(); out.push({ h1: '', h2: 'Approach total', fn: function (b) { var t = 0; g.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }); grp = []; };
+    cols.forEach(function (c) { if (c.h1) flush(); out.push(c); grp.push(c); });
+    flush(); return out;
+  };
+  var one = function (title, cols, cls, app) { return tableRows(M, title, app ? withApp(cols, cls) : cols, cell(cls), [{ h2: 'Total', fn: function (b) { var t = 0; cols.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }], false); };
   return [
     { name: 'Cars', rows: one('Cars — by movement', M.mcols, 'car'), file: 'cars' },
     { name: 'Heavy vehicles', rows: one('Heavy vehicles — by movement', M.mcols, 'truck'), file: 'heavy_vehicles' },
-    { name: 'Bikes', rows: one('Bicycles — by movement', M.mcols, 'bike'), file: 'bikes' },
-    { name: 'Pedestrians', rows: one('Pedestrians — by crosswalk and walking direction', M.pcols, 'ped'), file: 'pedestrians' }
+    { name: 'Bikes', rows: one('Bicycles — by movement', M.mcols, 'bike', true), file: 'bikes' },
+    { name: 'Pedestrians', rows: one('Pedestrians — by crosswalk and walking direction', M.pcols, 'ped', true), file: 'pedestrians' }
   ];
 }
 
