@@ -21,6 +21,7 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - **Notes:** timestamped notes with quick tags; included in the results and the intervals CSV.
 - **Legs:** add, rename, move or remove legs at any time, even mid-count. Removed legs keep their recorded counts.
 - **Peak hour:** the best four consecutive 15-minute intervals by total vehicles (cars + trucks + buses), whole intersection. Also shows peak hour factor, heavy-vehicle share, and the peak-hour movement matrix.
+- **Summary PDF:** the *Summary PDF* button on the results screen shows a preview, then *Share / Save PDF*. Pages: full-count diagram with every volume, peak-hour diagram, then tables for cars, trucks/buses, bicycles and pedestrians (peak hour shaded). Built in the app, works offline.
 - **Export:** tap an export button and a panel lists the file(s); tap *Share / Save* on each (or *Open*). One Excel file with three sheets, or the same three sheets as separate CSV files. Rows are 15-minute intervals; columns are grouped by leg as Left, Thru, Right (plus U-turn if any were counted). *Summary*: cars + trucks/buses per movement, total vehicles, bicycles, pedestrians, peak-hour flag, totals, peak-hour row, PHF, legs and notes. *Vehicles*: cars and trucks/buses as separate tables. *Bikes and Peds*: bicycles by movement, pedestrians by crosswalk and walking direction.
 
 ## Notes

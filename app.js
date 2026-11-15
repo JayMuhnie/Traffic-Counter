@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '10 (15 Nov 2026)';
+var APP_VERSION = '11 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -622,7 +622,7 @@ function renderResults() {
     '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr></tfoot></table></div></div>' +
     matrixHTML(A, S) +
     notesCardHTML() +
-    '<div class="row"><button class="ghost" id="exp1">Export Excel (3 sheets)</button><button class="ghost" id="exp2">Export 3 CSV files</button></div>' +
+    '<div class="row"><button class="ghost" id="exp1">Export Excel (3 sheets)</button><button class="ghost" id="exp2">Export 3 CSV files</button><button class="ghost" id="pdfbtn">Summary PDF</button></div>' +
     '<div class="row">' + (running ? '<button class="ghost" id="back">← Back to counting</button>' : '<button class="ghost" id="resume">Resume count</button>') +
     '<button class="ghost" id="notesres">Notes</button><button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div></div>';
 }
@@ -637,21 +637,34 @@ function saveOne(it) {   // plain download / open fallback
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   } catch (e) { toast('Could not save: ' + (e && e.message || e)); }
 }
+var NOSHARE_HINT = 'This iPad cannot open the share sheet for this file type from the app. Tap Open, then use the Share button in the viewer, or use the PDF / CSV files, which usually work.';
+function canShareIt(it) {
+  try {
+    if (!navigator.share) return false;
+    var file = new File([it.blob], it.name, { type: it.mime });
+    return navigator.canShare ? !!navigator.canShare({ files: [file] }) : true;
+  } catch (e) { return false; }
+}
 function shareOne(it) {
   var file = null;
   try { file = new File([it.blob], it.name, { type: it.mime }); } catch (e) {}
-  try {
-    if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-      navigator.share({ files: [file], title: it.name }).catch(function (err) { if (err && err.name === 'AbortError') return; saveOne(it); });
+  if (file && canShareIt(it)) {
+    try {
+      navigator.share({ files: [file], title: it.name }).catch(function (err) { if (err && err.name === 'AbortError') return; toast('Share sheet refused (' + (err && err.name || 'error') + ') — opening a viewer'); saveOne(it); });
       return;
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
+  toast('This iPad can not share this file type directly — use the Share button in the viewer');
   saveOne(it);
+}
+function shareText(it) {
+  try { navigator.share({ title: it.name, text: it.text }).catch(function () {}); } catch (e) { toast('Sharing text is not available'); }
 }
 function offerFiles(items, copyText) {
   var rows = items.map(function (it, i) {
     return '<div class="rrow"><div class="ri"><b>' + esc(it.name) + '</b><small>' + Math.max(1, Math.round(it.blob.size / 1024)) + ' KB</small></div>' +
-      '<button class="hb dark" data-a="share" data-i="' + i + '">Share / Save</button><a class="ghost lnk" data-i="' + i + '" target="_blank">Open</a></div>';
+      '<button class="hb dark" data-a="share" data-i="' + i + '">Share / Save</button>' + (it.text && navigator.share ? '<button class="ghost" data-a="text" data-i="' + i + '">Share as text</button>' : '') + '<a class="ghost lnk" data-i="' + i + '" target="_blank">Open</a></div>' +
+      (canShareIt(it) ? '' : '<p class="hint" style="margin:0 0 6px">' + NOSHARE_HINT + '</p>');
   }).join('');
   openSheet('Export', '<p class="hint">Tap a file to share it or save it to Files, email, AirDrop, etc.</p>' + rows + (copyText ? '<div class="row"><button class="ghost" data-a="copy">Copy summary as text</button></div>' : ''), function (box) {
     var links = box.querySelectorAll('a.lnk');
@@ -659,6 +672,7 @@ function offerFiles(items, copyText) {
     box.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-a]'); if (!b) return;
       if (b.dataset.a === 'share') shareOne(items[+b.dataset.i]);
+      else if (b.dataset.a === 'text') shareText(items[+b.dataset.i]);
       else if (b.dataset.a === 'copy') {
         try { navigator.clipboard.writeText(copyText).then(function () { toast('Copied'); }, function () { toast('Copy not allowed here'); }); } catch (e2) { toast('Copy not available'); }
       }
@@ -772,7 +786,7 @@ function exportCSVs() {
   try {
     var sheets = buildSheets();
     offerFiles(sheets.map(function (sh) {
-      return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['\ufeff' + csv(sh.rows)], { type: 'text/csv' }) };
+      return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['\ufeff' + csv(sh.rows)], { type: 'text/csv' }), text: csv(sh.rows) };
     }), csv(sheets[0].rows));
   } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
 }
@@ -831,6 +845,318 @@ function exportExcel() {
     var sheets = buildSheets();
     offerFiles([{ name: fileBase() + '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', blob: xlsxBlob(sheets) }], csv(sheets[0].rows));
   } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
+}
+
+/* ---------- summary PDF: drawing ops feed both the in-app preview (SVG) and the PDF file ---------- */
+var PW = 792, PH = 612;   // US Letter, landscape (points)
+var _mc = null;
+function tw(s, size, bold) {
+  try { if (!_mc) _mc = document.createElement('canvas').getContext('2d'); _mc.font = (bold ? 'bold ' : '') + '100px Helvetica, Arial, sans-serif'; return _mc.measureText(s).width * size / 100; }
+  catch (e) { return String(s).length * size * 0.55; }
+}
+function fitTxt(s, size, bold, maxw) { s = String(s); if (tw(s, size, bold) <= maxw) return s; while (s.length > 1 && tw(s + '…', size, bold) > maxw) s = s.slice(0, -1); return s + '…'; }
+
+function Dg(ox, oy, sc) {   // diagram helper: unit space (0..1000) -> page points
+  var ops = [];
+  var d = {
+    ops: ops, X: function (u) { return ox + u * sc; }, Y: function (u) { return oy + u * sc; },
+    rect: function (x, y, w, h, o) { ops.push({ t: 'rect', x: ox + x * sc, y: oy + y * sc, w: w * sc, h: h * sc, fill: o.fill, stroke: o.stroke, sw: o.sw, r: (o.r || 0) * sc }); },
+    line: function (x1, y1, x2, y2, o) { ops.push({ t: 'line', x1: ox + x1 * sc, y1: oy + y1 * sc, x2: ox + x2 * sc, y2: oy + y2 * sc, stroke: o.stroke, sw: o.sw, dash: o.dash }); },
+    poly: function (pts, o) { ops.push({ t: 'poly', pts: pts.map(function (p) { return [ox + p[0] * sc, oy + p[1] * sc]; }), fill: o.fill, stroke: o.stroke, sw: o.sw, close: o.close !== false }); },
+    text: function (x, y, s, size, o) { ops.push({ t: 'text', x: ox + x * sc, y: oy + y * sc, s: s, size: size, bold: o && o.bold, color: o && o.color, anchor: o && o.anchor }); }
+  };
+  return d;
+}
+function pt(a, v, k) { return { x: a.x + v.x * k, y: a.y + v.y * k }; }
+function drawArrow(D, ac, hd, dt, len, col, u) {   // arrives heading hd, leaves heading dt (unit vectors); u = U-turn
+  var pts, tip, dir;
+  if (u) {
+    var rv = { x: -hd.y, y: hd.x }, a = pt(pt(ac, rv, 11), hd, -len), b = pt(pt(ac, rv, 11), hd, len * 0.7), c = pt(pt(ac, rv, -11), hd, len * 0.7), e = pt(pt(ac, rv, -11), hd, -len * 0.5);
+    pts = [a, b, c, e]; dir = { x: -hd.x, y: -hd.y }; tip = e;
+  } else { pts = [pt(ac, hd, -len), ac, pt(ac, dt, len)]; dir = dt; tip = pts[2]; }
+  D.poly(pts.map(function (p) { return [p.x, p.y]; }), { stroke: col, sw: 1.6, close: false });
+  var pr = { x: -dir.y, y: dir.x }, h0 = pt(tip, dir, 11), h1 = pt(tip, pr, 7), h2 = pt(tip, pr, -7);
+  D.poly([[h0.x, h0.y], [h1.x, h1.y], [h2.x, h2.y]], { fill: col });
+}
+function numFmt(n) { return String(n); }
+
+/* one diagram page (full count or peak hour) */
+function diagramPage(M, i0, i1, title, sub, isPeak) {
+  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = 0.5;
+  var V = volumesIn(M, i0, i1), D = Dg(28, 64, sc);
+  D.rect(0, 0, 1000, 1000, { fill: '#dde7d6', stroke: '#94a3b8', sw: 0.8 });
+  legs.forEach(function (L) {
+    var d = uv(L.angle), q = { x: -d.y, y: d.x }, p1 = pt({ x: 500, y: 500 }, q, rw), p2 = pt(p1, d, 480), p3 = pt(pt({ x: 500, y: 500 }, q, -rw), d, 480), p4 = pt({ x: 500, y: 500 }, q, -rw);
+    D.poly([[p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y]], { fill: '#4b5563' });
+  });
+  var cp = []; for (var a = 0; a < 24; a++) cp.push([500 + rw * Math.cos(a * Math.PI / 12), 500 + rw * Math.sin(a * Math.PI / 12)]);
+  D.poly(cp, { fill: '#4b5563' });
+  legs.forEach(function (L) { var d = uv(L.angle), s = pt({ x: 500, y: 500 }, d, rw + 18), e = pt({ x: 500, y: 500 }, d, 480); D.line(s.x, s.y, e.x, e.y, { stroke: '#fbbf24', sw: 1, dash: [5, 4] }); });
+
+  var vehBox = function (c, w, h, hd, dt, mv, u) {
+    var vv = mv ? mv.car + mv.truck : 0;
+    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 12 });
+    drawArrow(D, { x: c.x, y: c.y - 20 }, hd, dt, 18, '#1e3a8a', u);
+    D.text(c.x, c.y + 28, numFmt(vv), 12, { bold: true, color: '#0f172a', anchor: 'm' });
+    if (mv && mv.bike) bikeBadge(c.x + w / 2 - 6, c.y - h / 2 + 6, mv.bike);
+  };
+  var bikeBadge = function (x, y, nb) {
+    var cpts = []; for (var a = 0; a < 16; a++) cpts.push([x + 15 * Math.cos(a * Math.PI / 8), y + 15 * Math.sin(a * Math.PI / 8)]);
+    D.poly(cpts, { fill: '#7c3aed', stroke: '#fff', sw: 0.8 });
+    D.text(x, y + 4.5 / sc * 0.5, String(nb), 7, { bold: true, color: '#fff', anchor: 'm' });
+  };
+  var pedBox = function (c, w, h, dt, np, vert) {
+    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ccfbf1', stroke: '#0d9488', sw: 1, r: 10 });
+    var ac = vert ? { x: c.x, y: c.y - h * 0.22 } : { x: c.x - w * 0.2, y: c.y };
+    drawArrow(D, ac, dt, dt, 16, '#115e59', false);
+    if (vert) D.text(c.x, c.y + h * 0.3, numFmt(np), 11, { bold: true, color: '#0f172a', anchor: 'm' });
+    else D.text(c.x + w * 0.22, c.y + 9, numFmt(np), 11, { bold: true, color: '#0f172a', anchor: 'm' });
+  };
+
+  legs.forEach(function (L, i) {
+    var d = uv(L.angle), right = { x: d.y, y: -d.x }, hd = { x: -d.x, y: -d.y }, th = L.angle * Math.PI / 180, t = { x: Math.cos(th), y: Math.sin(th) };
+    var at = function (r, lam, vec) { return { x: 500 + d.x * r + vec.x * lam, y: 500 + d.y * r + vec.y * lam }; };
+    var nbs = [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]];
+    if (panel) {
+      var vert = Math.abs(d.x) > 0.5;
+      nbs.forEach(function (pr) { var dt = { x: t.x * pr[1], y: t.y * pr[1] }; pedBox(at(202, pr[1] * 78, t), vert ? 66 : 150, vert ? 150 : 66, dt, V.p[L.id + '>' + pr[0].id] || 0, vert); });
+      legs.forEach(function (Dl) {
+        if (Dl.id === L.id) return;
+        var tn = turnOf(L.angle, Dl.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0;
+        vehBox(at(287, lam, right), 96, 96, hd, uv(Dl.angle), V.m[L.id + '>' + Dl.id], false);
+      });
+      var pu = at(368, -96, right), uvert = vert;
+      var umv = V.m[L.id + '>' + L.id], uc = pu, uw = uvert ? 56 : 128, uh = uvert ? 128 : 56;
+      D.rect(uc.x - uw / 2, uc.y - uh / 2, uw, uh, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 10 });
+      drawArrow(D, uvert ? { x: uc.x, y: uc.y - 24 } : { x: uc.x - 28, y: uc.y }, hd, hd, 14, '#1e3a8a', true);
+      D.text(uvert ? uc.x : uc.x + 28, uvert ? uc.y + 36 : uc.y + 9, numFmt(umv ? umv.car + umv.truck : 0), 11, { bold: true, color: '#0f172a', anchor: 'm' });
+      if (umv && umv.bike) bikeBadge(uc.x + uw / 2 - 4, uc.y - uh / 2 + 4, umv.bike);
+    } else {
+      var ex = legs.filter(function (g) { return g.id !== L.id; }).map(function (g) { return { leg: g, turn: turnOf(L.angle, g.angle), u: false }; }).sort(function (a, b) { return a.turn - b.turn; });
+      ex.push({ leg: L, turn: 180, u: true });
+      var cnt = ex.length, m = Math.max(Math.abs(d.x), Math.abs(d.y)), bs = 70, step, r0, lat;
+      for (; bs > 30; bs -= 2) { step = (bs + 3) / m; r0 = 122 + (bs / 2 + 2) / m; if (r0 + (cnt - 1) * step <= 452) break; }
+      lat = bs / 2 + 4;
+      ex.forEach(function (x, k) {
+        var c = at(r0 + k * step, lat, right);
+        var mv = V.m[L.id + '>' + x.leg.id], vv = mv ? mv.car + mv.truck : 0;
+        D.rect(c.x - bs / 2, c.y - bs / 2, bs, bs, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 10 });
+        drawArrow(D, { x: c.x, y: c.y - bs * 0.2 }, hd, uv(x.leg.angle), bs * 0.2, '#1e3a8a', x.u);
+        D.text(c.x, c.y + bs * 0.34, numFmt(vv), Math.max(6, Math.min(10, bs * sc * 0.4)), { bold: true, color: '#0f172a', anchor: 'm' });
+        if (mv && mv.bike) bikeBadge(c.x + bs / 2 - 5, c.y - bs / 2 + 5, mv.bike);
+      });
+      var rc = cwR(L, legs);
+      nbs.forEach(function (pr) {
+        var c = at(rc, pr[1] * (rw + 26), t), cpts = [], np = V.p[L.id + '>' + pr[0].id] || 0;
+        for (var a2 = 0; a2 < 16; a2++) cpts.push([c.x + 22 * Math.cos(a2 * Math.PI / 8), c.y + 22 * Math.sin(a2 * Math.PI / 8)]);
+        D.poly(cpts, { fill: '#ccfbf1', stroke: '#0d9488', sw: 1 });
+        D.text(c.x, c.y + 3.5 / sc, numFmt(np), 8, { bold: true, color: '#0f172a', anchor: 'm' });
+      });
+    }
+    // leg name, in the grass beside the end of the road
+    var nm = fitTxt(L.name, 8.5, true, 112), w = (tw(nm, 8.5, true) + 12) / sc, h = 15 / sc, sd = { x: -d.y, y: d.x };
+    if (!panel) sd = { x: -right.x, y: -right.y };
+    var off = rw + 10 + Math.abs(sd.x) * w / 2 + Math.abs(sd.y) * h / 2, R = 470;
+    var cx = 500 + d.x * R + sd.x * off, cy = 500 + d.y * R + sd.y * off;
+    cx = Math.max(w / 2 + 4, Math.min(996 - w / 2, cx)); cy = Math.max(h / 2 + 4, Math.min(996 - h / 2, cy));
+    D.rect(cx - w / 2, cy - h / 2, w, h, { fill: '#0f172a', r: h / 2 });
+    D.text(cx, cy + 3 / sc, nm, 8.5, { bold: true, color: '#ffffff', anchor: 'm' });
+  });
+  // compass
+  D.poly([[48, 40], [60, 80], [48, 72], [36, 80]], { fill: '#0f172a' }); D.text(48, 100 + 8, 'N', 8, { bold: true, color: '#0f172a', anchor: 'm' });
+
+  var ops = D.ops, T = V.tot, veh = T.car + T.truck, x0 = 556, y = 84;
+  ops.push({ t: 'text', x: 28, y: 36, s: title, size: 18, bold: true, color: '#0f172a' });
+  ops.push({ t: 'text', x: 28, y: 52, s: sub, size: 9.5, color: '#475569' });
+  var row = function (lab, val, bold) { ops.push({ t: 'text', x: x0, y: y, s: lab, size: 10.5, bold: bold, color: '#0f172a' }); ops.push({ t: 'text', x: 764, y: y, s: String(val), size: 10.5, bold: true, color: '#0f172a', anchor: 'r' }); y += 17; };
+  ops.push({ t: 'text', x: x0, y: y, s: isPeak ? 'Peak hour totals' : 'Full count totals', size: 12, bold: true, color: '#0f172a' }); y += 8;
+  ops.push({ t: 'line', x1: x0, y1: y, x2: 764, y2: y, stroke: '#cbd5e1', sw: 0.8 }); y += 15;
+  row('Vehicles (cars + trucks/buses)', veh, true); row('  Cars', T.car); row('  Trucks / buses', T.truck);
+  row('  Heavy vehicle share', veh ? (T.truck / veh * 100).toFixed(1) + '%' : '–');
+  if (isPeak && M.pk) row('Peak hour factor', M.pk.phf == null ? '–' : M.pk.phf.toFixed(3));
+  row('Bicycles', T.bike); row('Pedestrians', T.ped);
+  y += 10; ops.push({ t: 'text', x: x0, y: y, s: 'Vehicles entering, by approach', size: 12, bold: true, color: '#0f172a' }); y += 8;
+  ops.push({ t: 'line', x1: x0, y1: y, x2: 764, y2: y, stroke: '#cbd5e1', sw: 0.8 }); y += 15;
+  legs.forEach(function (L) {
+    var s = 0; Object.keys(V.m).forEach(function (k) { if (k.split('>')[0] === L.id) s += V.m[k].car + V.m[k].truck; });
+    ops.push({ t: 'text', x: x0, y: y, s: fitTxt(L.name + ' (' + dirOf(L.angle).n + ')', 10.5, false, 170), size: 10.5, color: '#0f172a' });
+    ops.push({ t: 'text', x: 764, y: y, s: String(s), size: 10.5, bold: true, color: '#0f172a', anchor: 'r' }); y += 16;
+  });
+  y += 8;
+  var legend = ['Boxes: cars + trucks/buses for each movement (arrow shows the turn).', 'Purple badge: bicycles making that movement.', panel ? 'Teal boxes: pedestrians crossing in the arrow direction.' : 'Teal circles: pedestrians crossing at that leg, walking toward that side.'];
+  var removed = S.legs.some(function (l) { return l.removed; });
+  if (removed) legend.push('Counts on removed legs are in the totals but not drawn.');
+  legend.forEach(function (s2) {
+    var words = s2.split(' '), line = '';
+    words.forEach(function (wd) { if (tw(line + ' ' + wd, 8.5, false) > 208) { ops.push({ t: 'text', x: x0, y: y, s: line, size: 8.5, color: '#64748b' }); y += 11; line = wd; } else line = line ? line + ' ' + wd : wd; });
+    ops.push({ t: 'text', x: x0, y: y, s: line, size: 8.5, color: '#64748b' }); y += 13;
+  });
+  return ops;
+}
+function volumesIn(M, i0, i1) {
+  var m = {}, p = {}, tot = { car: 0, truck: 0, bike: 0, ped: 0 };
+  for (var i = i0; i <= i1; i++) {
+    var b = M.bins[i]; if (!b) continue;
+    Object.keys(b.t).forEach(function (k) {
+      var o = b.t[k], key = k.slice(1);
+      if (k.charAt(0) === 'm') { var q = m[key] || (m[key] = { car: 0, truck: 0, bike: 0 }); q.car += o.car; q.truck += o.truck; q.bike += o.bike; tot.car += o.car; tot.truck += o.truck; tot.bike += o.bike; }
+      else { p[key] = (p[key] || 0) + o.ped; tot.ped += o.ped; }
+    });
+  }
+  return { m: m, p: p, tot: tot };
+}
+
+/* table pages: rows = intervals, columns = movements grouped by leg */
+function tablePages(M, title, cols, valFn, rowTot) {
+  var bins = M.bins, pk = M.pk, multiDay = bins.length && ymd(bins[0].start) !== ymd(bins[bins.length - 1].start);
+  var rows = bins.map(function (b, i) {
+    var vals = cols.map(function (c) { return valFn(b, c); }), tot = rowTot(b, vals);
+    return { label: (multiDay ? ymd(b.start).slice(5) + ' ' : '') + hhmm(b.start) + '–' + hhmm(b.start + BIN), vals: vals, tot: tot, hi: !!(pk && i >= pk.i && i < pk.i + 4) };
+  });
+  var sum = function (sel) { return cols.map(function (c, j) { return sel.reduce(function (s, r) { return s + r.vals[j]; }, 0); }); };
+  var tv = sum(rows), trow = { label: 'Total', vals: tv, tot: rows.reduce(function (s, r) { return s + r.tot; }, 0), bold: true };
+  var all = rows.slice(); all.push(trow);
+  if (pk) { var pr = rows.slice(pk.i, pk.i + 4); all.push({ label: 'Peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end), vals: sum(pr), tot: pr.reduce(function (s, r) { return s + r.tot; }, 0), bold: true, hi: true }); }
+  var firstW = 92, totW = 40, avail = PW - 56 - firstW - totW, cw = Math.min(46, avail / Math.max(1, cols.length)), left = 28;
+  var fs = Math.max(5, Math.min(9, cw / 3.4)), rh = 15, top = 108, perPage = Math.floor((PH - 52 - top) / rh);
+  var pages = [], pi = 0;
+  do {
+    var chunk = all.slice(pi * perPage, (pi + 1) * perPage), ops = [], y = top;
+    ops.push({ t: 'text', x: 28, y: 36, s: title + (pi ? ' (continued)' : ''), size: 18, bold: true, color: '#0f172a' });
+    ops.push({ t: 'text', x: 28, y: 52, s: (S.site || 'Untitled count') + ' · ' + ymd(S.startedAt) + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : ''), size: 9.5, color: '#475569' });
+    // group headers
+    var gx = left + firstW, k = 0;
+    while (k < cols.length) {
+      var h1 = cols[k].h1, span = 1; while (k + span < cols.length && !cols[k + span].h1) span++;
+      var wsp = span * cw;
+      ops.push({ t: 'text', x: gx + wsp / 2, y: 78, s: fitTxt(h1 || '', 8, true, wsp - 4), size: 8, bold: true, color: '#0f172a', anchor: 'm' });
+      ops.push({ t: 'line', x1: gx + 1, y1: 82, x2: gx + wsp - 1, y2: 82, stroke: '#64748b', sw: 1 });
+      gx += wsp; k += span;
+    }
+    var hs = Math.min(fs, 8.5);
+    cols.forEach(function (c, j) { var s = c.h2; while (tw(s, hs, true) > cw - 2 && s.length > 3) s = s.slice(0, -1); ops.push({ t: 'text', x: left + firstW + j * cw + cw / 2, y: 95, s: s, size: hs, bold: true, color: '#334155', anchor: 'm' }); });
+    ops.push({ t: 'text', x: left, y: 95, s: 'Interval', size: 8.5, bold: true, color: '#334155' });
+    ops.push({ t: 'text', x: left + firstW + cols.length * cw + totW - 4, y: 95, s: 'Total', size: 8.5, bold: true, color: '#334155', anchor: 'r' });
+    ops.push({ t: 'line', x1: left, y1: 100, x2: left + firstW + cols.length * cw + totW, y2: 100, stroke: '#0f172a', sw: 1 });
+    chunk.forEach(function (r) {
+      if (r.hi) ops.push({ t: 'rect', x: left, y: y - 11, w: firstW + cols.length * cw + totW, h: rh, fill: '#fef3c7' });
+      ops.push({ t: 'text', x: left + 2, y: y, s: r.label, size: 8.5, bold: r.bold, color: '#0f172a' });
+      r.vals.forEach(function (v, j) { ops.push({ t: 'text', x: left + firstW + j * cw + cw / 2, y: y, s: String(v), size: fs, bold: r.bold, color: v ? '#0f172a' : '#94a3b8', anchor: 'm' }); });
+      ops.push({ t: 'text', x: left + firstW + cols.length * cw + totW - 4, y: y, s: String(r.tot), size: 9, bold: true, color: '#0f172a', anchor: 'r' });
+      ops.push({ t: 'line', x1: left, y1: y + 4, x2: left + firstW + cols.length * cw + totW, y2: y + 4, stroke: '#e2e8f0', sw: 0.5 });
+      y += rh;
+    });
+    pages.push(ops); pi++;
+  } while (pi * perPage < all.length);
+  return pages;
+}
+
+function buildPdfPages() {
+  var M = exportModel(), pk = M.pk, pages = [], n = M.bins.length;
+  var span = hhmm(M.bins[0].start) + '–' + hhmm(M.bins[n - 1].start + BIN);
+  var meta = (S.site || 'Untitled count') + ' · ' + ymd(S.startedAt) + (S.observer ? ' · ' + S.observer : '');
+  pages.push(diagramPage(M, 0, n - 1, 'Full count — all volumes', meta + ' · ' + span, false));
+  if (pk) pages.push(diagramPage(M, pk.i, pk.i + 3, 'Peak hour — ' + hhmm(pk.start) + '–' + hhmm(pk.end), meta + ' · peak hour by cars + trucks/buses (' + pk.vol + ' vehicles)', true));
+  var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? o[cls] : 0; }; };
+  var sumOf = function (v) { return v.reduce(function (s, x) { return s + x; }, 0); };
+  [['Cars', 'car'], ['Trucks / buses', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0] + ' by movement', M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
+  pages = pages.concat(tablePages(M, 'Pedestrians by crosswalk', M.pcols, cell('ped'), function (b, v) { return sumOf(v); }));
+  pages.forEach(function (ops, i) {
+    ops.push({ t: 'text', x: 28, y: 596, s: meta, size: 8, color: '#94a3b8' });
+    ops.push({ t: 'text', x: 764, y: 596, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
+  });
+  return pages;
+}
+
+/* ops -> SVG (preview) */
+function pagesSVG(ops) {
+  var f2 = function (v) { return Math.round(v * 100) / 100; };
+  var o = '<svg viewBox="0 0 ' + PW + ' ' + PH + '" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif"><rect width="' + PW + '" height="' + PH + '" fill="#fff"/>';
+  ops.forEach(function (p) {
+    if (p.t === 'rect') o += '<rect x="' + f2(p.x) + '" y="' + f2(p.y) + '" width="' + f2(p.w) + '" height="' + f2(p.h) + '"' + (p.r ? ' rx="' + f2(p.r) + '"' : '') + ' fill="' + (p.fill || 'none') + '"' + (p.stroke ? ' stroke="' + p.stroke + '" stroke-width="' + (p.sw || 1) + '"' : '') + '/>';
+    else if (p.t === 'line') o += '<line x1="' + f2(p.x1) + '" y1="' + f2(p.y1) + '" x2="' + f2(p.x2) + '" y2="' + f2(p.y2) + '" stroke="' + p.stroke + '" stroke-width="' + (p.sw || 1) + '"' + (p.dash ? ' stroke-dasharray="' + p.dash.join(' ') + '"' : '') + '/>';
+    else if (p.t === 'poly') o += '<' + (p.close ? 'polygon' : 'polyline') + ' points="' + p.pts.map(function (q) { return f2(q[0]) + ',' + f2(q[1]); }).join(' ') + '" fill="' + (p.fill || 'none') + '"' + (p.stroke ? ' stroke="' + p.stroke + '" stroke-width="' + (p.sw || 1) + '" stroke-linejoin="round" stroke-linecap="round"' : '') + '/>';
+    else if (p.t === 'text') o += '<text x="' + f2(p.x) + '" y="' + f2(p.y) + '" font-size="' + p.size + '"' + (p.bold ? ' font-weight="bold"' : '') + ' fill="' + (p.color || '#000') + '"' + (p.anchor === 'm' ? ' text-anchor="middle"' : p.anchor === 'r' ? ' text-anchor="end"' : '') + '>' + esc(p.s) + '</text>';
+  });
+  return o + '</svg>';
+}
+
+/* ops -> PDF file */
+function pdfBlob(pages) {
+  var f = function (v) { return (Math.round(v * 100) / 100).toString(); };
+  var col = function (hex) { var h = (hex || '#000000').replace('#', ''); if (h.length === 3) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2); return [0, 2, 4].map(function (i) { return f(parseInt(h.substr(i, 2), 16) / 255); }).join(' '); };
+  var enc = function (s) {
+    var o = ''; s = String(s);
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i), ch = s.charAt(i);
+      if (ch === '(' || ch === ')' || ch === '\\') o += '\\' + ch;
+      else if (c < 32) o += ' ';
+      else if (c < 127) o += ch;
+      else if (c === 0x2013) o += '\\226'; else if (c === 0x2014) o += '\\227'; else if (c === 0x2026) o += '\\205'; else if (c === 0x00B7) o += '\\267';
+      else if (c === 0x2192) o += '>'; else if (c === 0x2019) o += '\\222';
+      else if (c >= 160 && c <= 255) o += '\\' + ('00' + c.toString(8)).slice(-3);
+      else o += '?';
+    }
+    return o;
+  };
+  var rr = function (x, Y, w, h, r) {
+    var k = 0.5523 * r;
+    return f(x + r) + ' ' + f(Y) + ' m ' + f(x + w - r) + ' ' + f(Y) + ' l ' + f(x + w - r + k) + ' ' + f(Y) + ' ' + f(x + w) + ' ' + f(Y + r - k) + ' ' + f(x + w) + ' ' + f(Y + r) + ' c ' +
+      f(x + w) + ' ' + f(Y + h - r) + ' l ' + f(x + w) + ' ' + f(Y + h - r + k) + ' ' + f(x + w - r + k) + ' ' + f(Y + h) + ' ' + f(x + w - r) + ' ' + f(Y + h) + ' c ' +
+      f(x + r) + ' ' + f(Y + h) + ' l ' + f(x + r - k) + ' ' + f(Y + h) + ' ' + f(x) + ' ' + f(Y + h - r + k) + ' ' + f(x) + ' ' + f(Y + h - r) + ' c ' +
+      f(x) + ' ' + f(Y + r) + ' l ' + f(x) + ' ' + f(Y + r - k) + ' ' + f(x + r - k) + ' ' + f(Y) + ' ' + f(x + r) + ' ' + f(Y) + ' c h ';
+  };
+  var paint = function (p) { return p.fill && p.stroke ? 'B' : p.fill ? 'f' : 'S'; };
+  var streams = pages.map(function (ops) {
+    var c = '';
+    ops.forEach(function (p) {
+      if (p.t === 'rect') {
+        var Y = PH - (p.y + p.h);
+        c += (p.fill ? col(p.fill) + ' rg ' : '') + (p.stroke ? col(p.stroke) + ' RG ' + f(p.sw || 1) + ' w ' : '') + (p.r > 0.5 ? rr(p.x, Y, p.w, p.h, Math.min(p.r, p.w / 2, p.h / 2)) : f(p.x) + ' ' + f(Y) + ' ' + f(p.w) + ' ' + f(p.h) + ' re ') + paint(p) + '\n';
+      } else if (p.t === 'line') {
+        c += col(p.stroke) + ' RG ' + f(p.sw || 1) + ' w ' + (p.dash ? '[' + p.dash.join(' ') + '] 0 d ' : '') + f(p.x1) + ' ' + f(PH - p.y1) + ' m ' + f(p.x2) + ' ' + f(PH - p.y2) + ' l S' + (p.dash ? ' [] 0 d' : '') + '\n';
+      } else if (p.t === 'poly') {
+        c += (p.fill ? col(p.fill) + ' rg ' : '') + (p.stroke ? col(p.stroke) + ' RG ' + f(p.sw || 1) + ' w 1 j 1 J ' : '') + p.pts.map(function (q, i) { return f(q[0]) + ' ' + f(PH - q[1]) + (i ? ' l ' : ' m '); }).join('') + (p.close ? 'h ' : '') + paint(p) + '\n';
+      } else if (p.t === 'text') {
+        var w = tw(p.s, p.size, p.bold), x = p.anchor === 'm' ? p.x - w / 2 : p.anchor === 'r' ? p.x - w : p.x;
+        c += 'BT /' + (p.bold ? 'F2' : 'F1') + ' ' + f(p.size) + ' Tf ' + col(p.color) + ' rg ' + f(x) + ' ' + f(PH - p.y) + ' Td (' + enc(p.s) + ') Tj ET\n';
+      }
+    });
+    return c;
+  });
+  var parts = [], offs = [], len = 0;
+  var add = function (s) { parts.push(s); len += s.length; };
+  var obj = function (id, s) { offs[id] = len; add(id + ' 0 obj\n' + s + '\nendobj\n'); };
+  add('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  var kids = pages.map(function (p, i) { return (5 + 2 * i) + ' 0 R'; }).join(' ');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Kids [' + kids + '] /Count ' + pages.length + ' >>');
+  obj(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  obj(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  streams.forEach(function (c, i) {
+    obj(5 + 2 * i, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' ' + PH + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ' + (6 + 2 * i) + ' 0 R >>');
+    obj(6 + 2 * i, '<< /Length ' + c.length + ' >>\nstream\n' + c + 'endstream');
+  });
+  var nobj = 4 + 2 * pages.length, xo = len, x = 'xref\n0 ' + (nobj + 1) + '\n0000000000 65535 f \n';
+  for (var i = 1; i <= nobj; i++) x += ('0000000000' + offs[i]).slice(-10) + ' 00000 n \n';
+  add(x + 'trailer\n<< /Size ' + (nobj + 1) + ' /Root 1 0 R >>\nstartxref\n' + xo + '\n%%EOF');
+  var all = parts.join(''), bytes = new Uint8Array(all.length);
+  for (var j = 0; j < all.length; j++) bytes[j] = all.charCodeAt(j) & 255;
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
+function openPdfPreview() {
+  var pages, blob;
+  try { pages = buildPdfPages(); blob = pdfBlob(pages); } catch (e) { toast('Could not build the PDF: ' + (e && e.message || e)); return; }
+  var it = { name: fileBase() + '_summary.pdf', mime: 'application/pdf', blob: blob };
+  var can = canShareIt(it);
+  openSheet('Summary PDF preview', '<div class="row"><button class="hb dark" data-a="share">Share / Save PDF</button><a class="ghost lnk" target="_blank">Open</a></div>' +
+    (can ? '' : '<p class="hint">' + NOSHARE_HINT + '</p>') +
+    pages.map(function (ops, i) { return '<div class="pdfpg">' + pagesSVG(ops) + '</div>'; }).join(''), function (box, sheet) {
+    var sh = $('.sheet', sheet); if (sh) sh.classList.add('wide');
+    var a = box.querySelector('a.lnk'); try { a.href = URL.createObjectURL(blob); } catch (e) {}
+    box.addEventListener('click', function (e) { var b = e.target.closest('button[data-a]'); if (b) shareOne(it); });
+  });
 }
 
 /* ---------- study management ---------- */
@@ -897,6 +1223,7 @@ app.addEventListener('click', function (e) {
     case 'resume': S.endedAt = null; persist(); view = 'count'; render(); break;
     case 'exp1': exportExcel(); break;
     case 'exp2': exportCSVs(); break;
+    case 'pdfbtn': openPdfPreview(); break;
     case 'newcount': if (confirm('Start a new count? This one is saved under Past counts.')) startNew(); break;
     case 'hist': openHistory(); break;
     case 'chkupd': toast('Checking…'); checkUpdate(true); break;
