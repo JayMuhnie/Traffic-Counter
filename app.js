@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '7 (15 Nov 2026)';
+var APP_VERSION = '8 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -622,64 +622,188 @@ function renderResults() {
     '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr></tfoot></table></div></div>' +
     matrixHTML(A, S) +
     notesCardHTML() +
-    '<div class="row"><button class="ghost" id="exp1">Export intervals CSV</button><button class="ghost" id="exp2">Export movements CSV</button></div>' +
+    '<div class="row"><button class="ghost" id="exp1">Export Excel (3 sheets)</button><button class="ghost" id="exp2">Export 3 CSV files</button></div>' +
     '<div class="row">' + (running ? '<button class="ghost" id="back">← Back to counting</button>' : '<button class="ghost" id="resume">Resume count</button>') +
     '<button class="ghost" id="notesres">Notes</button><button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div></div>';
 }
 
 /* ---------- export ---------- */
+/* delivering files: share sheet where available (iPad), otherwise a normal download */
+function shareFiles(items) {   // items: [{name, mime, blob}]
+  try {
+    var files = items.map(function (it) { return new File([it.blob], it.name, { type: it.mime }); });
+    if (navigator.canShare && navigator.canShare({ files: files })) { navigator.share({ files: files, title: items[0].name }).catch(function () {}); return; }
+  } catch (e) {}
+  items.forEach(function (it, i) {
+    setTimeout(function () {
+      var a = document.createElement('a');
+      if (!('download' in a)) { var rd = new FileReader(); rd.onload = function () { window.open(rd.result, '_blank'); }; rd.readAsDataURL(it.blob); return; }
+      a.href = URL.createObjectURL(it.blob); a.download = it.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+    }, i * 600);
+  });
+}
+
+/* ---- tables: rows are intervals, columns are movements grouped by leg (left, thru, right) ---- */
+function exportModel() {
+  var A = analyze(S), pk = A.peak, bins = A.bins, idx = {}, used = {}, usedP = {}, anyU = false;
+  bins.forEach(function (b, i) { idx[b.start] = i; b.t = {}; });
+  S.events.forEach(function (e) {
+    var key = e.from + '>' + e.to;
+    if (e.k === 'p') usedP[key] = 1; else { used[key] = 1; if (e.from === e.to) anyU = true; }
+    var b = bins[idx[binStart(e.t)]]; if (!b) return;
+    var tk = (e.k === 'p' ? 'p' : 'm') + key, o = b.t[tk] || (b.t[tk] = { car: 0, truck: 0, bike: 0, ped: 0 });
+    if (e.k === 'v') o[e.c === 'bus' ? 'truck' : e.c]++; else if (e.k === 'b') o.bike++; else o.ped++;
+  });
+  var active = sortedLegs(), act = {};
+  active.forEach(function (l) { act[l.id] = 1; });
+  var all = active.slice();
+  S.legs.forEach(function (l) { if (l.removed) { var has = Object.keys(used).concat(Object.keys(usedP)).some(function (k) { var p = k.split('>'); return p[0] === l.id || p[1] === l.id; }); if (has) all.push(l); } });
+  var head = function (L) { return L.name + (L.removed ? ' (removed)' : '') + ' (' + dirOf(L.angle).n + ')'; };
+
+  var mcols = [];
+  all.forEach(function (L) {
+    var ds = all.filter(function (g) { return g.id !== L.id; }).map(function (g) { return { g: g, tn: turnOf(L.angle, g.angle), u: false }; })
+      .sort(function (a, b) { return a.tn - b.tn; });
+    ds = ds.filter(function (x) { return (act[L.id] && act[x.g.id]) || used[L.id + '>' + x.g.id]; });
+    if (anyU && (act[L.id] || used[L.id + '>' + L.id])) ds.push({ g: L, tn: 180, u: true });
+    var cnt = {}; ds.forEach(function (x) { x.lb = x.u ? 'U-turn' : cap(turnLabel(x.tn).toLowerCase()); cnt[x.lb] = (cnt[x.lb] || 0) + 1; });
+    ds.forEach(function (x, i) {
+      mcols.push({ k: 'm' + L.id + '>' + x.g.id, h1: i === 0 ? head(L) : '', h2: cnt[x.lb] > 1 ? x.lb + ' → ' + x.g.name : x.lb });
+    });
+  });
+  var pcols = [], seen = {};
+  all.forEach(function (L) {
+    var i = active.indexOf(L), n = active.length, nb = [];
+    if (i >= 0) nb = [active[(i - 1 + n) % n], active[(i + 1) % n]];
+    Object.keys(usedP).forEach(function (k) { var p = k.split('>'); if (p[0] === L.id) { var g = S.legs.filter(function (x) { return x.id === p[1]; })[0]; if (g && nb.indexOf(g) < 0) nb.push(g); } });
+    var first = true;
+    nb.forEach(function (g) {
+      var key = L.id + '>' + g.id; if (seen[key]) return; seen[key] = 1;
+      if (!(act[L.id] && act[g.id]) && !usedP[key]) return;
+      var wd = walkDir(L.id, g.id);
+      pcols.push({ k: 'p' + key, h1: first ? 'Crossing ' + head(L) : '', h2: wd ? 'Walking ' + wd : 'Toward ' + g.name }); first = false;
+    });
+  });
+  return { A: A, pk: pk, bins: bins, mcols: mcols, pcols: pcols };
+}
+
+function tableRows(M, title, cols, fn, extras, peakRow) {
+  var rows = [], r, bins = M.bins, pk = M.pk;
+  var all = cols.concat(extras || []);
+  r = [title]; r.b = true; rows.push(r);
+  r = ['', '', ''].concat(all.map(function (c) { return c.h1 || ''; })); r.b = true; rows.push(r);
+  r = ['Date', 'Start', 'End'].concat(all.map(function (c) { return c.h2; })); r.b = true; rows.push(r);
+  var tot = all.map(function () { return 0; });
+  bins.forEach(function (b, i) {
+    rows.push([ymd(b.start), hhmm(b.start), hhmm(b.start + BIN)].concat(all.map(function (c, j) {
+      var v = c.fn ? c.fn(b, i) : fn(b, c);
+      if (typeof v === 'number') tot[j] += v;
+      return v;
+    })));
+  });
+  r = ['Total', '', ''].concat(all.map(function (c, j) { return c.text ? '' : tot[j]; })); r.b = true; rows.push(r);
+  if (peakRow && pk) {
+    var pr = all.map(function (c) {
+      if (c.text) return '';
+      var s = 0; for (var i = pk.i; i < pk.i + 4; i++) { var v = c.fn ? c.fn(bins[i], i) : fn(bins[i], c); if (typeof v === 'number') s += v; }
+      return s;
+    });
+    r = ['Peak hour', hhmm(pk.start), hhmm(pk.end)].concat(pr); r.b = true; rows.push(r);
+    rows.push(['Peak hour factor', '', '', pk.phf == null ? '' : +pk.phf.toFixed(3)]);
+  }
+  return rows;
+}
+
+function buildSheets() {
+  var M = exportModel(), pk = M.pk;
+  var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? (cls === 'veh' ? o.car + o.truck : o[cls]) : 0; }; };
+  var info = [['Site', S.site || ''], ['Date', ymd(S.startedAt)], ['Observer', S.observer || ''],
+    ['Peak hour (whole intersection, cars + trucks/buses)', pk ? hhmm(pk.start) + '–' + hhmm(pk.end) + ' · ' + pk.vol + ' vehicles' : 'n/a (fewer than 4 intervals)'], []];
+  var sum = info.concat(tableRows(M, 'Summary — cars + trucks/buses by movement', M.mcols, cell('veh'), [
+    { h2: 'Total vehicles', fn: function (b) { return b.veh; } },
+    { h2: 'Bicycles', fn: function (b) { return b.bike; } },
+    { h2: 'Pedestrians', fn: function (b) { return b.ped; } },
+    { h2: 'In peak hour', text: true, fn: function (b, i) { return pk && i >= pk.i && i < pk.i + 4 ? 'Y' : ''; } }
+  ], true));
+  if (pk) {
+    sum.push([]); var hv = ['Heavy vehicle share (peak hour)', '', '', pk.heavyPct == null ? '' : (pk.heavyPct * 100).toFixed(1) + '%']; sum.push(hv);
+  }
+  sum.push([]); sum.push(['Legs (N = top of screen)'].concat(sortedLegs().map(function (l) { return l.name + ' (' + dirOf(l.angle).n + ')'; })));
+  var ns = S.notes || [];
+  if (ns.length) { sum.push([]); var nh = ['Notes']; nh.b = true; sum.push(nh); sum.push(['Date', 'Time', 'Note']); ns.forEach(function (n) { sum.push([ymd(n.t), hhmm(n.t), n.text]); }); }
+
+  var veh = tableRows(M, 'Cars', M.mcols, cell('car'), [{ h2: 'Total', fn: function (b) { return b.car; } }], false)
+    .concat([[]], tableRows(M, 'Trucks / buses', M.mcols, cell('truck'), [{ h2: 'Total', fn: function (b) { return b.truck; } }], false));
+  var oth = tableRows(M, 'Bicycles — by movement', M.mcols, cell('bike'), [{ h2: 'Total', fn: function (b) { return b.bike; } }], false)
+    .concat([[]], tableRows(M, 'Pedestrians — by crosswalk and walking direction', M.pcols, cell('ped'), [{ h2: 'Total', fn: function (b) { return b.ped; } }], false));
+  return [{ name: 'Summary', rows: sum, file: 'summary' }, { name: 'Vehicles', rows: veh, file: 'vehicles' }, { name: 'Bikes and Peds', rows: oth, file: 'bikes_peds' }];
+}
+
 function csv(rows) {
   return rows.map(function (r) {
     return r.map(function (c) { c = c == null ? '' : String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(',');
   }).join('\r\n');
 }
 function fileBase() { return (S.site || 'count').replace(/[^\w\-]+/g, '_').slice(0, 40) + '_' + ymd(S.startedAt); }
-function share(name, text) {
-  var blob = new Blob([text], { type: 'text/csv' });
-  try {
-    var file = new File([blob], name, { type: 'text/csv' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: name }).catch(function () {}); return; }
-  } catch (e) {}
-  var a = document.createElement('a');
-  if (!('download' in a)) { window.open('data:text/csv;charset=utf-8,' + encodeURIComponent(text), '_blank'); return; }
-  a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+function exportCSVs() {
+  shareFiles(buildSheets().map(function (sh) {
+    return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['﻿' + csv(sh.rows)], { type: 'text/csv' }) };
+  }));
 }
-function exportIntervals() {
-  var A = analyze(S), pk = A.peak;
-  var rows = [['Site', 'Date', 'Observer', 'Interval start', 'Interval end', 'Cars', 'Trucks/Buses', 'Vehicles total', 'Bicycles', 'Pedestrians', 'In peak hour']];
-  A.bins.forEach(function (b, i) {
-    rows.push([S.site, ymd(b.start), S.observer, hhmm(b.start), hhmm(b.start + BIN), b.car, b.truck, b.veh, b.bike, b.ped, pk && i >= pk.i && i < pk.i + 4 ? 'Y' : '']);
-  });
-  rows.push([]);
-  if (pk) {
-    rows.push(['Peak hour (all vehicles)', hhmm(pk.start) + '-' + hhmm(pk.end)]);
-    rows.push(['Peak hour volume', pk.vol]);
-    rows.push(['Peak hour factor', pk.phf == null ? '' : pk.phf.toFixed(3)]);
-    rows.push(['Heavy vehicle share', pk.heavyPct == null ? '' : (pk.heavyPct * 100).toFixed(1) + '%']);
-  } else rows.push(['Peak hour', 'n/a (fewer than 4 intervals)']);
-  rows.push([]); rows.push(['Legs (direction as drawn, N = top)'].concat(sortedLegs().map(function (l) { return l.name + ' (' + dirOf(l.angle).n + ')'; })));
-  var ns = S.notes || [];
-  if (ns.length) { rows.push([]); rows.push(['Notes']); rows.push(['Date', 'Time', 'Note']); ns.forEach(function (n) { rows.push([ymd(n.t), hhmm(n.t), n.text]); }); }
-  share(fileBase() + '_intervals.csv', csv(rows));
+
+/* ---- minimal .xlsx writer (stored zip, no library, works offline) ---- */
+var CRC_T = (function () { var t = [], c, n, k; for (n = 0; n < 256; n++) { c = n; for (k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { var c = 0xFFFFFFFF; for (var i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function utf8(s) {
+  var e = unescape(encodeURIComponent(s)), b = new Uint8Array(e.length);
+  for (var i = 0; i < e.length; i++) b[i] = e.charCodeAt(i);
+  return b;
 }
-function exportMovements() {
-  var agg = {};
-  S.events.forEach(function (e) {
-    var bs = binStart(e.t), md = e.k === 'v' ? 'Vehicle' : e.k === 'b' ? 'Bicycle' : 'Pedestrian';
-    var cl = e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Truck/Bus') : '';
-    var key = [bs, md, e.from, e.to, cl].join('|');
-    agg[key] = (agg[key] || 0) + 1;
+function zipStore(files) {   // files: [{name, data(string)}]
+  var parts = [], central = [], off = 0;
+  var u16 = function (n) { return [n & 255, (n >> 8) & 255]; }, u32 = function (n) { return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]; };
+  files.forEach(function (f) {
+    var nm = utf8(f.name), d = utf8(f.data), crc = crc32(d);
+    var lh = [0x50, 0x4b, 3, 4].concat(u16(20), u16(0x0800), u16(0), u16(0), u16(0x21), u32(crc), u32(d.length), u32(d.length), u16(nm.length), u16(0));
+    parts.push(new Uint8Array(lh), nm, d);
+    central.push(new Uint8Array([0x50, 0x4b, 1, 2].concat(u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21), u32(crc), u32(d.length), u32(d.length), u16(nm.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(off))), nm);
+    off += lh.length + nm.length + d.length;
   });
-  var rows = [['Site', 'Date', 'Interval start', 'Interval end', 'Mode', 'From leg (crosswalk leg for pedestrians)', 'To leg (walking toward, for pedestrians)', 'Class', 'Count', 'Walking direction (pedestrians)']];
-  Object.keys(agg).map(function (k) { return k.split('|'); })
-    .sort(function (a, b) { return (a[0] - b[0]) || a[1].localeCompare(b[1]) || legNameOf(S, a[2]).localeCompare(legNameOf(S, b[2])) || legNameOf(S, a[3]).localeCompare(legNameOf(S, b[3])) || a[4].localeCompare(b[4]); })
-    .forEach(function (p) {
-      var bs = +p[0];
-      rows.push([S.site, ymd(bs), hhmm(bs), hhmm(bs + BIN), p[1], legNameOf(S, p[2]), p[2] === p[3] ? 'U-turn' : legNameOf(S, p[3]), p[4], agg[p.join('|')], p[1] === 'Pedestrian' ? walkDir(p[2], p[3]) : '']);
+  var csz = 0; central.forEach(function (c) { csz += c.length; });
+  parts = parts.concat(central);
+  parts.push(new Uint8Array([0x50, 0x4b, 5, 6].concat(u16(0), u16(0), u16(files.length), u16(files.length), u32(csz), u32(off), u16(0))));
+  return new Blob(parts, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function xlsxBlob(sheets) {
+  var X = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ''); };
+  var colName = function (i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+  var files = [
+    { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + sheets.map(function (s, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '</Types>' },
+    { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + sheets.map(function (s, i) { return '<sheet name="' + X(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map(function (s, i) { return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>'; }).join('') + '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: 'xl/styles.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>' }
+  ];
+  sheets.forEach(function (s, si) {
+    var w = 0; s.rows.forEach(function (r) { w = Math.max(w, r.length); });
+    var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"/></sheetViews><cols><col min="1" max="1" width="14" customWidth="1"/><col min="2" max="3" width="9" customWidth="1"/><col min="4" max="' + Math.max(4, w) + '" width="15" customWidth="1"/></cols><sheetData>';
+    s.rows.forEach(function (r, ri) {
+      xml += '<row r="' + (ri + 1) + '">';
+      r.forEach(function (v, ci) {
+        if (v === '' || v == null) return;
+        var ref = colName(ci) + (ri + 1), st = r.b ? ' s="1"' : '';
+        xml += typeof v === 'number' ? '<c r="' + ref + '"' + st + '><v>' + v + '</v></c>' : '<c r="' + ref + '"' + st + ' t="inlineStr"><is><t xml:space="preserve">' + X(v) + '</t></is></c>';
+      });
+      xml += '</row>';
     });
-  share(fileBase() + '_movements.csv', csv(rows));
+    files.push({ name: 'xl/worksheets/sheet' + (si + 1) + '.xml', data: xml + '</sheetData></worksheet>' });
+  });
+  return zipStore(files);
+}
+function exportExcel() {
+  shareFiles([{ name: fileBase() + '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', blob: xlsxBlob(buildSheets()) }]);
 }
 
 /* ---------- study management ---------- */
@@ -744,8 +868,8 @@ app.addEventListener('click', function (e) {
       if (confirm('Stop counting and view results?')) { S.endedAt = Date.now(); persist(); releaseAwake(); view = 'results'; render(); }
       break;
     case 'resume': S.endedAt = null; persist(); view = 'count'; render(); break;
-    case 'exp1': exportIntervals(); break;
-    case 'exp2': exportMovements(); break;
+    case 'exp1': exportExcel(); break;
+    case 'exp2': exportCSVs(); break;
     case 'newcount': if (confirm('Start a new count? This one is saved under Past counts.')) startNew(); break;
     case 'hist': openHistory(); break;
   }
