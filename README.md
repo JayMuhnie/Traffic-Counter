@@ -11,8 +11,9 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## Using it
 - **Setup:** name the site and set the legs. Each leg has a name and a direction (N, NE, E, ... — N is the top of the screen). A live preview shows the layout. 3 to 6 legs; a T-intersection is just N, E, W (or similar).
-- **Counting:** the count screen is a diagram of the intersection. Pick Vehicles / Bicycles / Pedestrians (and Car / Truck / Bus), then tap the arrow button on the approach the vehicle is arriving from. Buttons sit in the lane driving toward the junction and are ordered left, through, right, U-turn. Each button shows its count for the current 15-minute interval. The last button tapped keeps a yellow outline.
-- **Pedestrians:** two buttons on each crosswalk, one per walking direction (labelled with the compass direction walked). The movements CSV records the walking direction too.
+- **Counting:** the count screen is a top-down diagram of the intersection. Each leg shows its movement buttons laid out the way the driver sees the road: on the north leg, Right | Thru | Left from left to right on screen, with U-turn behind. Tap the button for the movement. Each button shows its count for the current 15-minute interval, and the last button tapped keeps a yellow outline. Intersections with more than 4 legs or diagonal legs use a compact layout instead (buttons stacked along each leg, with a Vehicles / Pedestrians toggle).
+- **Classes:** Car is the default. Tap Truck/Bus or Bike and the next count uses that class, then it drops back to Car. Double-tap to keep it selected (shown with a lock); tap Car to switch back. Bike counts appear as a small purple bubble on the movement and in the Bike total.
+- **Pedestrians:** two flat buttons on each crosswalk, one per walking direction, always on the diagram.
 - **Last counted / Recent:** the bar under the title shows the last tap with Undo. Recent lists the last 25 taps so a miscount can be fixed or removed later.
 - **Notes:** timestamped notes with quick tags; included in the results and the intervals CSV.
 - **Legs:** add, rename, move or remove legs at any time, even mid-count. Removed legs keep their recorded counts.

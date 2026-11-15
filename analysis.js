@@ -24,17 +24,17 @@
     var first = binStart(S.startedAt), last = binStart(lastT);
     var bins = [], byStart = {};
     for (var b = first; b <= last; b += BIN) {
-      var o = { start: b, car: 0, truck: 0, bus: 0, bike: 0, ped: 0, veh: 0 };
+      var o = { start: b, car: 0, truck: 0, bike: 0, ped: 0, veh: 0 };   // truck = trucks and buses
       bins.push(o); byStart[b] = o;
     }
     evs.forEach(function (e) {
       var bin = byStart[binStart(e.t)];
       if (!bin) return;
-      if (e.k === 'v') bin[e.c]++;
+      if (e.k === 'v') bin[e.c === 'bus' ? 'truck' : e.c]++;   // older counts recorded buses separately
       else if (e.k === 'b') bin.bike++;
       else if (e.k === 'p') bin.ped++;
     });
-    bins.forEach(function (x) { x.veh = x.car + x.truck + x.bus; });
+    bins.forEach(function (x) { x.veh = x.car + x.truck; });
 
     // Peak hour: best 4 consecutive intervals by total vehicles (cars + trucks + buses).
     var peak = null;
@@ -49,15 +49,15 @@
       peak.start = w[0].start;
       peak.end = w[3].start + BIN;
       peak.phf = maxBin > 0 ? peak.vol / (4 * maxBin) : null;
-      peak.car = sum('car'); peak.truck = sum('truck'); peak.bus = sum('bus');
+      peak.car = sum('car'); peak.truck = sum('truck');
       peak.bike = sum('bike'); peak.ped = sum('ped');
-      peak.heavyPct = peak.vol > 0 ? (peak.truck + peak.bus) / peak.vol : null;
+      peak.heavyPct = peak.vol > 0 ? peak.truck / peak.vol : null;
       peak.matrix = {};
       evs.forEach(function (e) {
         if (e.k !== 'v' || e.t < peak.start || e.t >= peak.end) return;
         var key = e.from + '>' + e.to;
-        var m = peak.matrix[key] || (peak.matrix[key] = { car: 0, truck: 0, bus: 0, total: 0 });
-        m[e.c]++; m.total++;
+        var m = peak.matrix[key] || (peak.matrix[key] = { car: 0, truck: 0, total: 0 });
+        m[e.c === 'bus' ? 'truck' : e.c]++; m.total++;
       });
     }
     return { bins: bins, peak: peak, first: first, last: last };

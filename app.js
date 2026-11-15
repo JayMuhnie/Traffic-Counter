@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '4 (15 Nov 2026)';
+var APP_VERSION = '5 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -49,8 +49,9 @@ function persistHist() { try { localStorage.setItem(LS_HIS, JSON.stringify(H)); 
 
 var S = load(LS_CUR, null) || newStudy();
 var H = load(LS_HIS, []);
-var mode = 'veh';          // 'veh' | 'b' | 'p'
-var cls = 'car';           // car | truck | bus
+var mode = 'veh';          // 'veh' | 'p' (only used by the compact layout)
+var cls = 'car';           // car | truck (trucks and buses) | bike
+var clsLocked = false, lastClsTap = 0;
 var alignStart = true;
 var view = S.startedAt ? (S.endedAt ? 'results' : 'count') : 'setup';
 
@@ -139,20 +140,26 @@ function turnLabel(t) {
 }
 function svgWrap(inner) { return '<svg class="isec" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>'; }
 
-function roadsInner(legs, small) {
-  var o = '', i;
-  legs.forEach(function (L) { o += '<g transform="translate(500 500) rotate(' + L.angle + ')"><rect class="rd" x="-110" y="-720" width="220" height="720"/></g>'; });
-  o += '<circle class="rd" cx="500" cy="500" r="110"/>';
+function layoutOf(legs) {   // lane layout for up to 4 legs on N/E/S/W; anything else uses the compact layout
+  return legs.length <= 4 && legs.every(function (l) { return l.angle % 90 === 0; }) ? 'panel' : 'compact';
+}
+function roadsInner(legs, small, rw) {
+  rw = rw || 110;
+  var o = '', i, panel = rw > 110;
+  legs.forEach(function (L) { o += '<g transform="translate(500 500) rotate(' + L.angle + ')"><rect class="rd" x="' + (-rw) + '" y="-720" width="' + (2 * rw) + '" height="720"/></g>'; });
+  o += '<circle class="rd" cx="500" cy="500" r="' + rw + '"/>';
   legs.forEach(function (L) {
-    o += '<g transform="translate(500 500) rotate(' + L.angle + ')"><line class="cl" x1="0" y1="-128" x2="0" y2="-720"/>';
-    var cw = cwR(L, legs);
-    for (i = -4; i <= 4; i++) o += '<rect class="zb" x="' + (i * 24 - 7) + '" y="' + (-(cw + 15)) + '" width="14" height="30"/>';
+    o += '<g transform="translate(500 500) rotate(' + L.angle + ')"><line class="cl" x1="0" y1="' + (-(rw + 18)) + '" x2="0" y2="-720"/>';
+    if (!panel) {
+      var cw = cwR(L, legs);
+      for (i = -4; i <= 4; i++) o += '<rect class="zb" x="' + (i * 24 - 7) + '" y="' + (-(cw + 15)) + '" width="14" height="30"/>';
+    }
     o += '</g>';
   });
-  legs.forEach(function (L) {   // name tag on the leaving lane at the end of each leg
+  legs.forEach(function (L) {   // name tag at the end of each leg
     var d = uv(L.angle), out = { x: -d.y, y: d.x }, fs = small ? 44 : 28, nm = shortTxt(L.name, 14);
     var w = Math.min(nm.length * fs * 0.58 + 30, 340), h = fs + 16, x0, y0;
-    if (small) { x0 = 500 + d.x * 410 - w / 2; y0 = 500 + d.y * 410 - h / 2; }
+    if (small || panel) { var rr = small ? 410 : 432; x0 = 500 + d.x * rr - w / 2; y0 = 500 + d.y * rr - h / 2; }
     else {
       var px = 500 + d.x * 452 + out.x * 56, py = 500 + d.y * 452 + out.y * 56;
       x0 = Math.abs(d.x) < 0.2 ? (out.x > 0 ? 506 : 494 - w) : px - w / 2;
@@ -164,7 +171,7 @@ function roadsInner(legs, small) {
   });
   return o;
 }
-function roadsSVG(legs) { return svgWrap(roadsInner(legs, true)); }
+function roadsSVG(legs) { return svgWrap(roadsInner(legs, true, layoutOf(legs) === 'panel' ? 160 : 110)); }
 
 /* ---------- leg editor (used in setup + sheet) ---------- */
 function legEditor(box) {
@@ -178,7 +185,7 @@ function legEditor(box) {
         '<button data-a="del" class="del"' + (legs.length <= 3 ? ' disabled' : '') + '>✕</button></div>';
     }).join('') +
       '<button data-a="add" class="ghost add"' + (legs.length >= MAX_LEGS ? ' disabled' : '') + '>+ Add leg</button>' +
-      '<p class="hint">Choose the direction each leg points on the diagram (N = top of the screen). The count screen, turns and crosswalks are drawn from this. 3 to ' + MAX_LEGS + ' legs.</p>';
+      '<p class="hint">Choose the direction each leg points on the diagram (N = top of the screen). Up to 4 legs pointing N, E, S or W get the lane layout; 5 or more legs, or diagonal legs, use a compact layout. 3 to ' + MAX_LEGS + ' legs.</p>';
     drawPreview();
   }
   box.addEventListener('input', function (e) {
@@ -259,29 +266,41 @@ function uIcon(h) {
   var a = Math.atan2(-h.x, h.y) * 180 / Math.PI;
   return '<g transform="translate(0 -6) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
 }
+function badgeG(k, from, to, cx, cy) {   // small purple bubble: bicycles that made this movement in the current interval
+  return k === 'v' ? '<g class="bk" data-bk="b|' + from + '|' + to + '" visibility="hidden"><circle cx="' + cx + '" cy="' + cy + '" r="15"/><text x="' + cx + '" y="' + (cy + 6) + '">0</text></g>' : '';
+}
 function mvG(k, from, to, label, icon, x, y, f, extra) {
   return '<g class="mv' + (extra || '') + '" data-k="' + k + '" data-from="' + from + '" data-to="' + to + '" transform="translate(' + f1(x) + ' ' + f1(y) + ') scale(' + (Math.round(f * 1000) / 1000) + ')">' +
     '<rect class="bg" x="-44" y="-44" width="88" height="88" rx="16"/>' +
     '<rect class="flash" x="-44" y="-44" width="88" height="88" rx="16"/>' +
     '<rect class="rg0" x="-46" y="-46" width="92" height="92" rx="18"/><rect class="rg1" x="-46" y="-46" width="92" height="92" rx="18"/>' +
     '<text class="lb" x="0" y="-27"' + (label.length > 7 ? ' style="font-size:' + Math.max(9, Math.floor(115 / label.length)) + 'px"' : '') + '>' + esc(label) + '</text>' + icon +
-    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text></g>';
+    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text>' + badgeG(k, from, to, 38, -38) + '</g>';
 }
+function flatG(k, from, to, icon, x, y, w, h, extra, vert) {   // flat button: icon then count (side by side, or stacked when vert)
+  var hw = w / 2, hh = h / 2;
+  return '<g class="mv' + (extra || '') + '" data-k="' + k + '" data-from="' + from + '" data-to="' + to + '" transform="translate(' + f1(x) + ' ' + f1(y) + ')">' +
+    '<rect class="bg" x="' + (-hw) + '" y="' + (-hh) + '" width="' + w + '" height="' + h + '" rx="14"/>' +
+    '<rect class="flash" x="' + (-hw) + '" y="' + (-hh) + '" width="' + w + '" height="' + h + '" rx="14"/>' +
+    '<rect class="rg0" x="' + (-hw - 2) + '" y="' + (-hh - 2) + '" width="' + (w + 4) + '" height="' + (h + 4) + '" rx="16"/><rect class="rg1" x="' + (-hw - 2) + '" y="' + (-hh - 2) + '" width="' + (w + 4) + '" height="' + (h + 4) + '" rx="16"/>' +
+    '<g transform="' + (vert ? 'translate(0 ' + f1(-h * 0.2 + 6) + ')' : 'translate(' + f1(-w * 0.2) + ' 6)') + ' scale(1.2)">' + icon + '</g>' +
+    '<text class="n" x="' + (vert ? 0 : f1(w * 0.22)) + '" y="' + (vert ? f1(h * 0.22 + 11) : 11) + '" data-key="' + k + '|' + from + '|' + to + '">0</text>' + badgeG(k, from, to, hw - 4, -hh + 2) + '</g>';
+}
+var COMPASS = '<g transform="translate(62 62)"><circle r="34" class="cmp"/><polygon class="cmpn" points="0,-24 9,10 0,4 -9,10"/><text class="cmpt" y="-38">N</text></g>';
 
+/* compact layout: used for 5+ legs or diagonal legs (buttons stacked along each leg, crosswalks behind a toggle) */
 function countSVG(legs, md) {
-  var n = legs.length, o = roadsInner(legs, false), k = md === 'veh' ? 'v' : 'b';
+  var n = legs.length, o = roadsInner(legs, false), k = 'v';
   if (md === 'p') {
-    // crosswalk buttons: two walking directions per leg
     legs.forEach(function (L, i) {
       var th = L.angle * Math.PI / 180, d = uv(L.angle), t = { x: Math.cos(th), y: Math.sin(th) };   // t = clockwise walking direction
       var sep = 47 / Math.max(Math.abs(t.x), Math.abs(t.y)), rc = cwR(L, legs);
       [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]].forEach(function (pr) {
         var dt = { x: t.x * pr[1], y: t.y * pr[1] };
-        o += mvG('p', L.id, pr[0].id, dirOf((L.angle + (pr[1] > 0 ? 90 : 270)) % 360).f.toUpperCase(), arrowIcon(dt, dt), 500 + d.x * rc + dt.x * sep, 500 + d.y * rc + dt.y * sep, 1, '');
+        o += mvG('p', L.id, pr[0].id, dirOf((L.angle + (pr[1] > 0 ? 90 : 270)) % 360).f.toUpperCase(), arrowIcon(dt, dt), 500 + d.x * rc + dt.x * sep, 500 + d.y * rc + dt.y * sep, 1, ' pd');
       });
     });
   } else {
-    // approach buttons sit in the lane that drives toward the junction (right-hand traffic)
     legs.forEach(function (L) {
       var d = uv(L.angle), right = { x: d.y, y: -d.x }, hd = { x: -d.x, y: -d.y };
       var ex = legs.filter(function (g) { return g.id !== L.id; })
@@ -296,14 +315,55 @@ function countSVG(legs, md) {
       });
     });
   }
-  o += '<g transform="translate(62 62)"><circle r="34" class="cmp"/><polygon class="cmpn" points="0,-24 9,10 0,4 -9,10"/><text class="cmpt" y="-38">N</text></g>';
-  return svgWrap(o);
+  return svgWrap(o + COMPASS);
+}
+
+/* lane layout: each leg shows crosswalk buttons, then Right | Thru | Left across the road as the driver sees it from above, then U-turn */
+function panelSVG(legs) {
+  var o = roadsInner(legs, false, 160), n = legs.length;
+  legs.forEach(function (L, i) {
+    var d = uv(L.angle), right = { x: d.y, y: -d.x }, hd = { x: -d.x, y: -d.y };
+    var th = L.angle * Math.PI / 180, t = { x: Math.cos(th), y: Math.sin(th) }, vert = Math.abs(d.x) > 0.5;   // t = clockwise walking direction; vert = east/west leg
+    var at = function (r, lam, vec) { return { x: 500 + d.x * r + vec.x * lam, y: 500 + d.y * r + vec.y * lam }; };
+    [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]].forEach(function (pr) {   // crosswalk: one button per walking direction
+      var dt = { x: t.x * pr[1], y: t.y * pr[1] }, p = at(202, pr[1] * 78, t);
+      o += flatG('p', L.id, pr[0].id, arrowIcon(dt, dt), p.x, p.y, vert ? 66 : 150, vert ? 150 : 66, ' pd', vert);
+    });
+    legs.forEach(function (D) {
+      if (D.id === L.id) return;
+      var tn = turnOf(L.angle, D.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0, p = at(287, lam, right);   // + lam = driver's right
+      o += mvG('v', L.id, D.id, turnLabel(tn), arrowIcon(hd, uv(D.angle)), p.x, p.y, 1.06, '');
+    });
+    var pu = at(368, -96, right);
+    o += flatG('v', L.id, L.id, uIcon(hd), pu.x, pu.y, vert ? 56 : 128, vert ? 128 : 56, ' u', vert);
+  });
+  return svgWrap(o + COMPASS);
+}
+
+/* class selector: Truck/Bus and Bike count once, then fall back to Car; double-tap keeps one selected */
+var CLS_LABEL = { car: 'Car', truck: 'Truck/Bus', bike: 'Bike' };
+function clsColour() { return cls === 'truck' ? 'var(--truck)' : cls === 'bike' ? 'var(--bike)' : 'var(--car)'; }
+function clsBtnsHTML() {
+  return ['car', 'truck', 'bike'].map(function (c) {
+    return '<button data-cls="' + c + '"' + (cls === c ? ' class="on"' : '') + '>' + CLS_LABEL[c] + (cls === c && clsLocked ? ' 🔒' : '') + '</button>';
+  }).join('');
+}
+function applyCls() {
+  var nav = $('.classes'); if (nav) nav.innerHTML = clsBtnsHTML();
+  var st = $('.stage'); if (st) st.style.setProperty('--c', clsColour());
+}
+function clsTap(c) {
+  var now = Date.now();
+  if (c === 'car') { cls = 'car'; clsLocked = false; }
+  else if (cls === c && !clsLocked && now - lastClsTap < 500) { clsLocked = true; toast(CLS_LABEL[c] + ' stays selected — tap Car to switch back'); }
+  else { cls = c; clsLocked = false; }
+  lastClsTap = now; applyCls();
 }
 
 function renderCount() {
   fixAngles(S);
-  var legs = sortedLegs();
-  var colour = mode === 'veh' ? 'var(--' + cls + ')' : mode === 'b' ? 'var(--bike)' : 'var(--ped)';
+  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel';
+  if (panel) mode = 'veh';
   app.innerHTML =
     '<div class="cv"><header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
     '<div class="sub"><span id="clock"></span> · interval <b id="binlabel"></b></div></div>' +
@@ -311,10 +371,10 @@ function renderCount() {
     '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button><button id="stop" class="hb stop">Stop</button></div>' +
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
     '<div id="banner"></div>' +
-    '<div class="cmain"><aside class="ctl"><nav class="modes">' +
-    [['veh', 'Vehicles'], ['b', 'Bicycles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>' +
-    (mode === 'veh' ? '<nav class="classes">' + [['car', 'Car'], ['truck', 'Truck'], ['bus', 'Bus']].map(function (c) { return '<button data-cls="' + c[0] + '"' + (cls === c[0] ? ' class="on"' : '') + '>' + c[1] + '</button>'; }).join('') + '</nav>' : '') +
-    '</aside><div class="stage' + (mode === 'p' ? ' pedmode' : '') + '" style="--c:' + colour + '">' + countSVG(legs, mode) + '</div></div></div>';
+    '<div class="cmain"><aside class="ctl">' +
+    (panel ? '' : '<nav class="modes">' + [['veh', 'Vehicles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>') +
+    (panel || mode === 'veh' ? '<nav class="classes">' + clsBtnsHTML() + '</nav><p class="clshint">Truck/Bus and Bike count once, then go back to Car. Double-tap to keep one selected.</p>' : '') +
+    '</aside><div class="stage' + (!panel && mode === 'p' ? ' pedmode' : '') + '" style="--c:' + clsColour() + '">' + (panel ? panelSVG(legs) : countSVG(legs, mode)) + '</div></div></div>';
   keepAwake();
   tick();
 }
@@ -335,6 +395,7 @@ function tick() {
   if (view !== 'count') return;
   var c = binCounts();
   app.querySelectorAll('.n').forEach(function (el) { el.textContent = c.m[el.dataset.key] || 0; });
+  app.querySelectorAll('.bk').forEach(function (g) { var nb = c.m[g.dataset.bk] || 0; g.setAttribute('visibility', nb ? 'visible' : 'hidden'); g.querySelector('text').textContent = nb; });
   var d = new Date(now);
   $('#clock').textContent = hhmm(now) + ':' + pad(d.getSeconds());
   $('#binlabel').textContent = hhmm(c.bs) + '–' + hhmm(c.bs + BIN);
@@ -347,8 +408,8 @@ function tick() {
 setInterval(tick, 1000);
 
 var hms = function (t) { var d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
-function kindLabel(e) { return e.k === 'v' ? cap(e.c) : e.k === 'b' ? 'Bike' : 'Pedestrian'; }
-function chipCls(e) { return e.k === 'v' ? e.c : e.k === 'b' ? 'bike' : 'ped'; }
+function kindLabel(e) { return e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Truck/Bus') : e.k === 'b' ? 'Bike' : 'Pedestrian'; }
+function chipCls(e) { return e.k === 'v' ? (e.c === 'car' ? 'car' : 'truck') : e.k === 'b' ? 'bike' : 'ped'; }
 function routeLabel(st, e) {
   if (e.k === 'p') return 'Crossing ' + legNameOf(st, e.from) + ' → toward ' + legNameOf(st, e.to);
   return e.from === e.to ? legNameOf(st, e.from) + ' U-turn' : 'From ' + legNameOf(st, e.from) + ' → ' + legNameOf(st, e.to);
@@ -360,7 +421,7 @@ function updateLast(pulse) {
   var el = $('#last'); if (!el) return;
   var e = S.events[S.events.length - 1], box = $('#lasttxt');
   app.querySelectorAll('.mv.lastb').forEach(function (m) { m.classList.remove('lastb'); });
-  if (e) { var lm = app.querySelector('.mv[data-k="' + e.k + '"][data-from="' + e.from + '"][data-to="' + e.to + '"]'); if (lm) lm.classList.add('lastb'); }
+  if (e) { var lm = app.querySelector('.mv[data-k="' + (e.k === 'b' ? 'v' : e.k) + '"][data-from="' + e.from + '"][data-to="' + e.to + '"]'); if (lm) lm.classList.add('lastb'); }
   if (!e) { box.innerHTML = '<span class="mut">Nothing counted yet</span>'; return; }
   var ago = Math.max(0, Math.round((Date.now() - e.t) / 1000));
   var agoTxt = ago < 60 ? ago + ' s ago' : Math.floor(ago / 60) + ' min ago';
@@ -377,7 +438,7 @@ function openRecent() {
     for (var i = n - 1; i >= 0 && out.length < 25; i--) {
       var e = S.events[i];
       out.push('<div class="rrow" data-i="' + i + '"><div class="ri"><span class="chip ' + chipCls(e) + '">' + esc(kindLabel(e)) + '</span>' + esc(routeLabel(S, e)) + '<small>' + hms(e.t) + '</small></div>' +
-        (e.k === 'v' ? '<div class="cs">' + ['car', 'truck', 'bus'].map(function (c) { return '<button class="cb' + (e.c === c ? ' on' : '') + '" data-a="cls" data-c="' + c + '">' + cap(c) + '</button>'; }).join('') + '</div>' : '') +
+        (e.k === 'v' ? '<div class="cs">' + ['car', 'truck'].map(function (c) { return '<button class="cb' + ((e.c === c || (c === 'truck' && e.c === 'bus')) ? ' on' : '') + '" data-a="cls" data-c="' + c + '">' + (c === 'car' ? 'Car' : 'Truck/Bus') + '</button>'; }).join('') + '</div>' : '') +
         '<button class="ghost del" data-a="del">✕</button></div>');
     }
     return '<p class="hint">Most recent first (last 25). Change the class or remove a miscount.</p>' + out.join('');
@@ -428,10 +489,12 @@ function tap(btn) {
   if (!S.startedAt || S.endedAt) return;
   var now = Date.now();
   if (now < S.startedAt) { toast('Count has not started yet'); return; }
-  var ev = { t: now, k: btn.dataset.k, from: btn.dataset.from, to: btn.dataset.to };
+  var isVeh = btn.dataset.k === 'v';
+  var ev = { t: now, k: isVeh && cls === 'bike' ? 'b' : btn.dataset.k, from: btn.dataset.from, to: btn.dataset.to };
   if (ev.k === 'v') ev.c = cls;
   S.events.push(ev); persist(); tick(); updateLast(true);
   sound(ev.k === 'v' ? ev.c : ev.k === 'b' ? 'bike' : 'ped');
+  if (isVeh && !clsLocked && cls !== 'car') { cls = 'car'; applyCls(); }
   btn.classList.add('hit'); setTimeout(function () { btn.classList.remove('hit'); }, 110);
 }
 function undo() {
@@ -452,7 +515,7 @@ function matrixHTML(A, st) {
     var rt = 0;
     var cells = legs.map(function (t) {
       var m = pk.matrix[f.id + '>' + t.id];
-      var v = m ? m.total : 0, h = m ? m.truck + m.bus : 0;
+      var v = m ? m.total : 0, h = m ? m.truck : 0;
       rt += v; colTot[t.id] = (colTot[t.id] || 0) + v;
       return '<td>' + (v || '') + (h ? '<small>' + h + ' heavy</small>' : '') + '</td>';
     }).join('');
@@ -466,7 +529,7 @@ function matrixHTML(A, st) {
 
 function renderResults() {
   var A = analyze(S), pk = A.peak, running = !S.endedAt;
-  var tot = A.bins.reduce(function (s, b) { s.car += b.car; s.truck += b.truck; s.bus += b.bus; s.veh += b.veh; s.bike += b.bike; s.ped += b.ped; return s; }, { car: 0, truck: 0, bus: 0, veh: 0, bike: 0, ped: 0 });
+  var tot = A.bins.reduce(function (s, b) { s.car += b.car; s.truck += b.truck; s.veh += b.veh; s.bike += b.bike; s.ped += b.ped; return s; }, { car: 0, truck: 0, veh: 0, bike: 0, ped: 0 });
   var warns = [];
   if (running) warns.push('Count still in progress — the current interval is incomplete.');
   if (binStart(S.startedAt) !== S.startedAt) warns.push('Count started at ' + hhmm(S.startedAt) + ', so the first interval is partial.');
@@ -477,12 +540,12 @@ function renderResults() {
     '<div class="kpi"><small>Peak hour</small><b>' + hhmm(pk.start) + '–' + hhmm(pk.end) + '</b></div>' +
     '<div class="kpi"><small>Peak-hour vehicles</small><b>' + pk.vol + '</b></div>' +
     '<div class="kpi"><small>Peak hour factor</small><b>' + (pk.phf == null ? '–' : pk.phf.toFixed(2)) + '</b></div>' +
-    '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' trucks · ' + pk.bus + ' buses</small></div>' +
+    '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' trucks/buses</small></div>' +
     '<div class="kpi"><small>Bikes / peds in peak</small><b>' + pk.bike + ' / ' + pk.ped + '</b></div>' : '';
 
   var rows = A.bins.map(function (b, i) {
     var inPk = pk && i >= pk.i && i < pk.i + 4;
-    return '<tr' + (inPk ? ' class="pk"' : '') + '><td>' + hhmm(b.start) + '–' + hhmm(b.start + BIN) + '</td><td>' + b.car + '</td><td>' + b.truck + '</td><td>' + b.bus + '</td><td><b>' + b.veh + '</b></td><td>' + b.bike + '</td><td>' + b.ped + '</td></tr>';
+    return '<tr' + (inPk ? ' class="pk"' : '') + '><td>' + hhmm(b.start) + '–' + hhmm(b.start + BIN) + '</td><td>' + b.car + '</td><td>' + b.truck + '</td><td><b>' + b.veh + '</b></td><td>' + b.bike + '</td><td>' + b.ped + '</td></tr>';
   }).join('');
 
   app.innerHTML =
@@ -490,8 +553,8 @@ function renderResults() {
     '<p class="hint">' + ymd(S.startedAt) + (S.observer ? ' · ' + esc(S.observer) : '') + '</p>' +
     warns.map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('') +
     '<div class="kpis">' + peakKpis + '</div>' +
-    '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Truck</th><th>Bus</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
-    '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.bus + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr></tfoot></table></div></div>' +
+    '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Truck/Bus</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
+    '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr></tfoot></table></div></div>' +
     matrixHTML(A, S) +
     notesCardHTML() +
     '<div class="row"><button class="ghost" id="exp1">Export intervals CSV</button><button class="ghost" id="exp2">Export movements CSV</button></div>' +
@@ -520,9 +583,9 @@ function share(name, text) {
 }
 function exportIntervals() {
   var A = analyze(S), pk = A.peak;
-  var rows = [['Site', 'Date', 'Observer', 'Interval start', 'Interval end', 'Cars', 'Trucks', 'Buses', 'Vehicles total', 'Bicycles', 'Pedestrians', 'In peak hour']];
+  var rows = [['Site', 'Date', 'Observer', 'Interval start', 'Interval end', 'Cars', 'Trucks/Buses', 'Vehicles total', 'Bicycles', 'Pedestrians', 'In peak hour']];
   A.bins.forEach(function (b, i) {
-    rows.push([S.site, ymd(b.start), S.observer, hhmm(b.start), hhmm(b.start + BIN), b.car, b.truck, b.bus, b.veh, b.bike, b.ped, pk && i >= pk.i && i < pk.i + 4 ? 'Y' : '']);
+    rows.push([S.site, ymd(b.start), S.observer, hhmm(b.start), hhmm(b.start + BIN), b.car, b.truck, b.veh, b.bike, b.ped, pk && i >= pk.i && i < pk.i + 4 ? 'Y' : '']);
   });
   rows.push([]);
   if (pk) {
@@ -540,7 +603,7 @@ function exportMovements() {
   var agg = {};
   S.events.forEach(function (e) {
     var bs = binStart(e.t), md = e.k === 'v' ? 'Vehicle' : e.k === 'b' ? 'Bicycle' : 'Pedestrian';
-    var cl = e.k === 'v' ? cap(e.c) : '';
+    var cl = e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Truck/Bus') : '';
     var key = [bs, md, e.from, e.to, cl].join('|');
     agg[key] = (agg[key] || 0) + 1;
   });
@@ -562,7 +625,7 @@ function archiveCurrent() {
 }
 function startNew() {
   archiveCurrent();
-  S = newStudy(S); persist(); mode = 'veh'; cls = 'car'; view = 'setup'; render();
+  S = newStudy(S); persist(); mode = 'veh'; cls = 'car'; clsLocked = false; view = 'setup'; render();
 }
 function openHistory() {
   function list() {
@@ -595,7 +658,7 @@ app.addEventListener('click', function (e) {
   var mvEl = e.target.closest('.mv'); if (mvEl) return tap(mvEl);
   var t = e.target.closest('button'); if (!t) return;
   if (t.dataset.mode) { mode = t.dataset.mode; return render(); }
-  if (t.dataset.cls) { cls = t.dataset.cls; return render(); }
+  if (t.dataset.cls) return clsTap(t.dataset.cls);
   switch (t.id) {
     case 'start':
       if (activeLegs().length < 3) { toast('An intersection needs at least 3 legs'); return; }
