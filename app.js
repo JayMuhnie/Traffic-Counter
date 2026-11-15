@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '16 (15 Nov 2026)';
+var APP_VERSION = '17 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -248,7 +248,7 @@ function legEditor(box) {
   function drawPreview() { var pv = box.querySelector('.pv'); if (pv) pv.innerHTML = roadsSVG(sortedLegs()); }
   function draw() {
     var legs = sortedLegs();
-    box.innerHTML = '<div class="pv"></div>' + legs.map(function (l) {
+    box.innerHTML = '<div class="xpv"></div>' + legs.map(function (l) {
       return '<div class="legrow" data-id="' + l.id + '"><input class="ln" value="' + esc(l.name) + '" aria-label="Leg name">' +
         '<select class="la" aria-label="Direction this leg points">' + DIRS.map(function (d) { return '<option value="' + d.a + '"' + (d.a === l.angle ? ' selected' : '') + '>' + d.n + '</option>'; }).join('') + '</select>' +
         '<button data-a="del" class="del"' + (legs.length <= 3 ? ' disabled' : '') + '>✕</button></div>';
@@ -641,6 +641,25 @@ function matrixHTML(A, st) {
     legs.map(function (l) { return '<td>' + (colTot[l.id] || 0) + '</td>'; }).join('') + '<td>' + grand + '</td></tr></tfoot></table></div></div>';
 }
 
+var pvTab = 0;
+function previewHTML() {
+  var sh = buildSheets(), i, tabs = '', body = '';
+  if (pvTab >= sh.length) pvTab = 0;
+  for (i = 0; i < sh.length; i++) tabs += '<button class="seg' + (i === pvTab ? ' on' : '') + '" data-pv="' + i + '">' + esc(sh[i].name) + '</button>';
+  var R = sh[pvTab].rows, g = R[1], h = R[2], n = h.length, head1 = '<th></th>', c, span;
+  for (c = 3; c < n; c++) {
+    if (g[c]) { span = 1; while (c + span < n && !g[c + span] && c + span < n - 1) span++; head1 += '<th class="grp" colspan="' + span + '">' + esc(g[c]) + '</th>'; c += span - 1; }
+    else head1 += '<th></th>';
+  }
+  var head2 = '<th>Interval</th>'; for (c = 3; c < n; c++) head2 += '<th>' + esc(h[c]) + '</th>';
+  for (i = 3; i < R.length; i++) {
+    var r = R[i], isT = r[0] === 'Total', row = '<td>' + (isT ? 'Total' : esc(r[1]) + '–' + esc(r[2])) + '</td>';
+    for (c = 3; c < n; c++) row += '<td>' + (r[c] === 0 ? '<span class="z">0</span>' : r[c]) + '</td>';
+    body += '<tr' + (isT ? ' class="sumr"' : '') + '>' + row + '</tr>';
+  }
+  return '<div class="card"><h2>Export preview</h2><p class="hint">This is what the Excel and CSV files contain. Excel has one sheet per table; CSV has one file per table.</p><div class="segs">' + tabs + '</div><div class="scroll"><table class="xpv"><thead><tr>' + head1 + '</tr><tr>' + head2 + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+}
+
 function renderResults() {
   var A = analyze(S), pk = A.peak, running = !S.endedAt;
   var tot = A.bins.reduce(function (s, b) { s.car += b.car; s.truck += b.truck; s.veh += b.veh; s.bike += b.bike; s.ped += b.ped; return s; }, { car: 0, truck: 0, veh: 0, bike: 0, ped: 0 });
@@ -661,23 +680,26 @@ function renderResults() {
     return '<tr' + (inPk ? ' class="pk"' : '') + '><td>' + hhmm(b.start) + '–' + hhmm(b.start + BIN) + '</td><td>' + b.car + '</td><td>' + b.truck + '</td><td><b>' + b.veh + '</b></td><td>' + b.bike + '</td><td>' + b.ped + '</td></tr>';
   }).join('');
 
+  var nN = (S.notes || []).length;
   app.innerHTML =
     '<div class="page"><h1>' + esc(S.site || 'Untitled count') + '</h1>' +
     '<p class="hint">' + ymdw(S.startedAt) + (S.observer ? ' · ' + esc(S.observer) : '') + (S.weather ? ' · ' + esc(S.weather) : '') + '</p>' +
     warns.map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('') +
+    '<div class="xgrid">' +
+    '<button class="hb dark" id="pdfbtn">Summary PDF<small>Diagrams and tables</small></button>' +
+    '<button class="hb dark" id="exp1">Excel<small>4 sheets</small></button>' +
+    '<button class="hb dark" id="exp2">CSV<small>4 files</small></button></div>' +
+    '<div class="row">' + (running ? '<button class="ghost" id="back">← Back to counting</button>' : '<button class="ghost" id="resume">Resume count</button>') +
+    '<button class="ghost" id="notesres">Notes' + (nN ? ' (' + nN + ')' : '') + '</button>' +
+    '<button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div>' +
     '<div class="kpis">' + peakKpis + '</div>' +
     '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Heavy vehicle</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
     '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr>' +
     (pk ? '<tr class="pkr"><td>Peak hour</td><td>' + (pk.vol - pk.truck) + '</td><td>' + pk.truck + '</td><td>' + pk.vol + '</td><td>' + pk.bike + '</td><td>' + pk.ped + '</td></tr>' : '') +
     '</tfoot></table></div></div>' +
     matrixHTML(A, S) +
-    notesCardHTML(true) +
-    '<div class="card"><h2>Export</h2><div class="xgrid">' +
-    '<button class="hb dark" id="pdfbtn">Summary PDF<small>Diagrams and tables</small></button>' +
-    '<button class="hb dark" id="exp1">Excel<small>3 sheets</small></button>' +
-    '<button class="hb dark" id="exp2">CSV<small>3 files</small></button></div></div>' +
-    '<div class="row">' + (running ? '<button class="ghost" id="back">← Back to counting</button>' : '<button class="ghost" id="resume">Resume count</button>') +
-    '<button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div></div>';
+    previewHTML() +
+    ((S.notes || []).length ? notesCardHTML(false) : '') + '</div>';
 }
 
 /* ---------- export ---------- */
@@ -823,28 +845,15 @@ function tableRows(M, title, cols, fn, extras, peakRow) {
 }
 
 function buildSheets() {
-  var M = exportModel(), pk = M.pk;
-  var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? (cls === 'veh' ? o.car + o.truck : o[cls]) : 0; }; };
-  var info = [['Site', S.site || ''], ['Date', ymdw(S.startedAt)], ['Observer', S.observer || ''], ['Weather', S.weather || ''],
-    ['Peak hour (whole intersection, cars + heavy vehicles)', pk ? hhmm(pk.start) + '–' + hhmm(pk.end) + ' · ' + pk.vol + ' vehicles' : 'n/a (needs four complete 15-minute intervals in a row; ' + M.A.nFull + ' complete)'], []];
-  var sum = info.concat(tableRows(M, 'Summary — cars + heavy vehicles by movement', M.mcols, cell('veh'), [
-    { h2: 'Total vehicles', fn: function (b) { return b.veh; } },
-    { h2: 'Bicycles', fn: function (b) { return b.bike; } },
-    { h2: 'Pedestrians', fn: function (b) { return b.ped; } },
-    { h2: 'In peak hour', text: true, fn: function (b, i) { return pk && i >= pk.i && i < pk.i + 4 ? 'Y' : ''; } }
-  ], true));
-  if (pk) {
-    sum.push([]); var hv = ['Heavy vehicle share (peak hour)', '', '', pk.heavyPct == null ? '' : (pk.heavyPct * 100).toFixed(1) + '%']; sum.push(hv);
-  }
-  sum.push([]); sum.push(['Legs (N = top of screen)'].concat(sortedLegs().map(function (l) { return l.name + ' (' + dirOf(l.angle).n + ')'; })));
-  var ns = S.notes || [];
-  if (ns.length) { sum.push([]); var nh = ['Notes']; nh.b = true; sum.push(nh); sum.push(['Date', 'Time', 'Note']); ns.forEach(function (n) { sum.push([ymd(n.t), hhmm(n.t), n.text]); }); }
-
-  var veh = tableRows(M, 'Cars', M.mcols, cell('car'), [{ h2: 'Total', fn: function (b) { return b.car; } }], false)
-    .concat([[]], tableRows(M, 'Heavy vehicles', M.mcols, cell('truck'), [{ h2: 'Total', fn: function (b) { return b.truck; } }], false));
-  var oth = tableRows(M, 'Bicycles — by movement', M.mcols, cell('bike'), [{ h2: 'Total', fn: function (b) { return b.bike; } }], false)
-    .concat([[]], tableRows(M, 'Pedestrians — by crosswalk and walking direction', M.pcols, cell('ped'), [{ h2: 'Total', fn: function (b) { return b.ped; } }], false));
-  return [{ name: 'Summary', rows: sum, file: 'summary' }, { name: 'Vehicles', rows: veh, file: 'vehicles' }, { name: 'Bikes and Peds', rows: oth, file: 'bikes_peds' }];
+  var M = exportModel();
+  var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? o[cls] : 0; }; };
+  var one = function (title, cols, cls) { return tableRows(M, title, cols, cell(cls), [{ h2: 'Total', fn: function (b) { var t = 0; cols.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }], false); };
+  return [
+    { name: 'Cars', rows: one('Cars — by movement', M.mcols, 'car'), file: 'cars' },
+    { name: 'Heavy vehicles', rows: one('Heavy vehicles — by movement', M.mcols, 'truck'), file: 'heavy_vehicles' },
+    { name: 'Bikes', rows: one('Bicycles — by movement', M.mcols, 'bike'), file: 'bikes' },
+    { name: 'Pedestrians', rows: one('Pedestrians — by crosswalk and walking direction', M.pcols, 'ped'), file: 'pedestrians' }
+  ];
 }
 
 function csv(rows) {
@@ -1333,6 +1342,7 @@ app.addEventListener('click', function (e) {
   var mvEl = e.target.closest('.mv'); if (mvEl) return tap(mvEl);
   var t = e.target.closest('button'); if (!t) return;
   if (t.dataset.mode) { mode = t.dataset.mode; return render(); }
+  if (t.dataset.pv != null && t.dataset.pv !== '') { pvTab = +t.dataset.pv; return render(); }
   if (t.dataset.cls) return clsTap(t.dataset.cls);
   switch (t.id) {
     case 'start':

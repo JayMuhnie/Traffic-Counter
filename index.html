@@ -240,6 +240,15 @@ button.ghost.sm{min-height:34px;padding:4px 12px;font-size:14px}
 .xgrid{display:grid;grid-template-columns:repeat(3,1fr);grid-gap:10px;gap:10px}
 .xgrid .hb{padding:10px 8px;line-height:1.2}.xgrid .hb small{display:block;font-weight:400;opacity:.8;font-size:12px;margin-top:2px}
 @media(max-width:479px){.xgrid{grid-template-columns:1fr}}
+.segs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}.nogap .segs>*+*{margin-left:8px}
+.seg{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:6px 14px;min-height:36px;font-weight:600;font-size:14px;color:#334155}
+.seg.on{background:var(--dark);color:#fff;border-color:var(--dark)}
+table.xpv{font-size:12px;width:100%}table.xpv th,table.xpv td{padding:6px 4px;text-align:right;white-space:nowrap}
+table.xpv th:first-child,table.xpv td:first-child{text-align:left}
+table.xpv th.grp{text-align:center;border-bottom:1px solid #cbd5e1}
+table.xpv tr.sumr td{font-weight:800;border-top:2px solid var(--ink)}
+table.xpv .z{color:#b6bfcb}
+.page>.xgrid{margin-bottom:12px}
 </style>
 </head>
 <body>

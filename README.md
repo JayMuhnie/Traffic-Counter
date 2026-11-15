@@ -49,3 +49,7 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v16
 - Results page tidied: four headline tiles, a Peak hour row under the interval totals (replaces the bikes/peds tile), Notes card has its own Add/Edit button, and Export (PDF, Excel, CSV) is one grouped card. Resume / New count / Past counts are a separate row.
+
+## v17
+- Excel (4 sheets) and CSV (4 files) now contain only the Cars, Heavy vehicles, Bikes and Pedestrians tables. The summary sheet, legs row, "In peak hour" column and peak-hour rows are gone.
+- Results page: buttons moved to the top under the warnings; the four export tables are shown as a tabbed preview; Notes card only appears when there are notes.
