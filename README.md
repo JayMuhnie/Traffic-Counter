@@ -46,3 +46,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - Intersection name is the header on every PDF page.
 - Short counts: centre label reads "PEAK HOUR" (with a "less than a full hour" note).
 - Sound: count taps now play short audio clips (they sound even with the side mute switch on) with a Web Audio fallback. Check the 🔊 toggle and volume.
+
+## v16
+- Results page tidied: four headline tiles, a Peak hour row under the interval totals (replaces the bikes/peds tile), Notes card has its own Add/Edit button, and Export (PDF, Excel, CSV) is one grouped card. Resume / New count / Past counts are a separate row.

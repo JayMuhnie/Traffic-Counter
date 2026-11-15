@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '15 (15 Nov 2026)';
+var APP_VERSION = '16 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -545,9 +545,9 @@ function openRecent() {
 }
 
 /* notes */
-function notesCardHTML() {
+function notesCardHTML(edit) {
   var ns = S.notes || [];
-  return '<div class="card"><h2>Notes</h2>' + (ns.length ? ns.map(function (n) { return '<p class="nline"><small>' + hms(n.t) + '</small>' + esc(n.text) + '</p>'; }).join('') : '<p class="hint">No notes.</p>') + '</div>';
+  return '<div class="card"><div class="chead"><h2>Notes</h2>' + (edit ? '<button class="ghost sm" id="notesres">' + (ns.length ? 'Edit' : 'Add note') + '</button>' : '') + '</div>' + (ns.length ? ns.map(function (n) { return '<p class="nline"><small>' + hms(n.t) + '</small>' + esc(n.text) + '</p>'; }).join('') : '<p class="hint">No notes.</p>') + '</div>';
 }
 function openNotes() {
   function list() {
@@ -651,11 +651,10 @@ function renderResults() {
   if (!pk) warns.push('No peak hour yet: it needs four complete 15-minute intervals in a row (one full hour). Complete intervals so far: ' + A.nFull + '. Partial first or last intervals do not count.');
 
   var peakKpis = pk ?
-    '<div class="kpi"><small>Peak hour</small><b>' + hhmm(pk.start) + '–' + hhmm(pk.end) + '</b></div>' +
-    '<div class="kpi"><small>Peak-hour vehicles</small><b>' + pk.vol + '</b></div>' +
+    '<div class="kpi"><small>Peak hour</small><b class="nw">' + hhmm(pk.start) + '–' + hhmm(pk.end) + '</b></div>' +
+    '<div class="kpi"><small>Vehicles in peak hour</small><b>' + pk.vol + '</b></div>' +
     '<div class="kpi"><small>Peak hour factor</small><b>' + (pk.phf == null ? '–' : pk.phf.toFixed(2)) + '</b></div>' +
-    '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' heavy vehicles</small></div>' +
-    '<div class="kpi"><small>Bikes / peds in peak</small><b>' + pk.bike + ' / ' + pk.ped + '</b></div>' : '';
+    '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' of ' + pk.vol + '</small></div>' : '';
 
   var rows = A.bins.map(function (b, i) {
     var inPk = pk && i >= pk.i && i < pk.i + 4;
@@ -668,12 +667,17 @@ function renderResults() {
     warns.map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('') +
     '<div class="kpis">' + peakKpis + '</div>' +
     '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Heavy vehicle</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
-    '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr></tfoot></table></div></div>' +
+    '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr>' +
+    (pk ? '<tr class="pkr"><td>Peak hour</td><td>' + (pk.vol - pk.truck) + '</td><td>' + pk.truck + '</td><td>' + pk.vol + '</td><td>' + pk.bike + '</td><td>' + pk.ped + '</td></tr>' : '') +
+    '</tfoot></table></div></div>' +
     matrixHTML(A, S) +
-    notesCardHTML() +
-    '<div class="row"><button class="ghost" id="exp1">Export Excel (3 sheets)</button><button class="ghost" id="exp2">Export 3 CSV files</button><button class="ghost" id="pdfbtn">Summary PDF</button></div>' +
+    notesCardHTML(true) +
+    '<div class="card"><h2>Export</h2><div class="xgrid">' +
+    '<button class="hb dark" id="pdfbtn">Summary PDF<small>Diagrams and tables</small></button>' +
+    '<button class="hb dark" id="exp1">Excel<small>3 sheets</small></button>' +
+    '<button class="hb dark" id="exp2">CSV<small>3 files</small></button></div></div>' +
     '<div class="row">' + (running ? '<button class="ghost" id="back">← Back to counting</button>' : '<button class="ghost" id="resume">Resume count</button>') +
-    '<button class="ghost" id="notesres">Notes</button><button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div></div>';
+    '<button class="ghost" id="newcount">New count</button><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div></div>';
 }
 
 /* ---------- export ---------- */
