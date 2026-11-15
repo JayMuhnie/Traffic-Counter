@@ -13,13 +13,32 @@ var cap = function (s) { return s.charAt(0).toUpperCase() + s.slice(1); };
 var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
 var pct = function (x) { return x == null ? '–' : (x * 100).toFixed(1) + '%'; };
 
+var DIRS = [
+  { a: 0, n: 'N', f: 'North' }, { a: 45, n: 'NE', f: 'Northeast' }, { a: 90, n: 'E', f: 'East' }, { a: 135, n: 'SE', f: 'Southeast' },
+  { a: 180, n: 'S', f: 'South' }, { a: 225, n: 'SW', f: 'Southwest' }, { a: 270, n: 'W', f: 'West' }, { a: 315, n: 'NW', f: 'Northwest' }
+];
+var DIR_ORDER = [0, 90, 180, 270, 45, 135, 225, 315];
+var MAX_LEGS = 6;
+function dirOf(a) { for (var i = 0; i < DIRS.length; i++) if (DIRS[i].a === a) return DIRS[i]; return DIRS[0]; }
+function fixAngles(st) {   // older counts have no leg directions: assign them N, E, S, W, ...
+  var used = {};
+  st.legs.forEach(function (l) { if (!l.removed && typeof l.angle === 'number') used[l.angle] = 1; });
+  st.legs.forEach(function (l) {
+    if (typeof l.angle === 'number') return;
+    var a = 0;
+    for (var i = 0; i < DIR_ORDER.length; i++) if (!used[DIR_ORDER[i]]) { a = DIR_ORDER[i]; break; }
+    l.angle = a; used[a] = 1;
+  });
+}
 function newStudy(prev) {
-  var names = ['North', 'East', 'South', 'West'];
+  if (prev) fixAngles(prev);
+  var base = prev
+    ? prev.legs.filter(function (l) { return !l.removed; }).map(function (l) { return { name: l.name, angle: l.angle }; })
+    : [{ name: 'North', angle: 0 }, { name: 'East', angle: 90 }, { name: 'South', angle: 180 }, { name: 'West', angle: 270 }];
   return {
     id: uid(), site: prev ? prev.site : '', observer: prev ? prev.observer : '',
     created: Date.now(), startedAt: null, endedAt: null,
-    legs: (prev ? prev.legs.filter(function (l) { return !l.removed; }).map(function (l) { return l.name; }) : names)
-      .map(function (n) { return { id: uid(), name: n, removed: false }; }),
+    legs: base.map(function (l) { return { id: uid(), name: l.name, angle: l.angle, removed: false }; }),
     events: [], notes: []
   };
 }
@@ -91,43 +110,102 @@ function keepAwake() {
 function releaseAwake() { try { if (wl) { wl.release(); wl = null; } } catch (e) {} }
 document.addEventListener('visibilitychange', function () { if (view === 'count') keepAwake(); });
 
+/* ---------- intersection drawing ---------- */
+var uv = function (a) { var r = a * Math.PI / 180; return { x: Math.sin(r), y: -Math.cos(r) }; };  // outward direction of a leg (compass angle, clockwise from screen-up)
+var f1 = function (n) { return Math.round(n * 10) / 10; };
+var shortTxt = function (t, n) { t = String(t); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+var sortedLegs = function () { return activeLegs().slice().sort(function (a, b) { return a.angle - b.angle; }); };
+var turnOf = function (a, b) { return ((b - a - 180) % 360 + 540) % 360 - 180; };   // + right, - left, 0 straight (for a driver arriving on leg a, leaving on leg b)
+function cwR(L, legs) {   // distance of a leg's crosswalk from the centre; diagonal legs next to a cardinal leg sit further out so buttons don't collide
+  if (L.angle % 90 === 0) return 172;
+  var near = legs.some(function (g) { var dd = Math.abs(g.angle - L.angle); dd = Math.min(dd, 360 - dd); return g.id !== L.id && dd === 45; });
+  return near ? 325 : 172;
+}
+function walkDir(from, to) {   // compass direction a pedestrian walks when crossing leg `from` toward neighbouring leg `to`
+  var legs = sortedLegs(), i = legs.findIndex(function (l) { return l.id === from; });
+  if (i < 0) return '';
+  var n = legs.length, th = legs[i].angle;
+  if (legs[(i + 1) % n].id === to) return dirOf((th + 90) % 360).f;
+  if (legs[(i - 1 + n) % n].id === to) return dirOf((th + 270) % 360).f;
+  return '';
+}
+function turnLabel(t) {
+  var a = Math.abs(t), sd = t < 0 ? 'L' : 'R';
+  if (a < 23) return 'THRU';
+  if (a < 68) return 'BEAR ' + sd;
+  if (a < 113) return t < 0 ? 'LEFT' : 'RIGHT';
+  return 'SHARP ' + sd;
+}
+function svgWrap(inner) { return '<svg class="isec" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>'; }
+
+function roadsInner(legs, small) {
+  var o = '', i;
+  legs.forEach(function (L) { o += '<g transform="translate(500 500) rotate(' + L.angle + ')"><rect class="rd" x="-110" y="-720" width="220" height="720"/></g>'; });
+  o += '<circle class="rd" cx="500" cy="500" r="110"/>';
+  legs.forEach(function (L) {
+    o += '<g transform="translate(500 500) rotate(' + L.angle + ')"><line class="cl" x1="0" y1="-128" x2="0" y2="-720"/>';
+    var cw = cwR(L, legs);
+    for (i = -4; i <= 4; i++) o += '<rect class="zb" x="' + (i * 24 - 7) + '" y="' + (-(cw + 15)) + '" width="14" height="30"/>';
+    o += '</g>';
+  });
+  legs.forEach(function (L) {   // name tag on the leaving lane at the end of each leg
+    var d = uv(L.angle), out = { x: -d.y, y: d.x }, fs = small ? 44 : 28, nm = shortTxt(L.name, 14);
+    var w = Math.min(nm.length * fs * 0.58 + 30, 340), h = fs + 16, x0, y0;
+    if (small) { x0 = 500 + d.x * 410 - w / 2; y0 = 500 + d.y * 410 - h / 2; }
+    else {
+      var px = 500 + d.x * 452 + out.x * 56, py = 500 + d.y * 452 + out.y * 56;
+      x0 = Math.abs(d.x) < 0.2 ? (out.x > 0 ? 506 : 494 - w) : px - w / 2;
+      y0 = py - h / 2;
+    }
+    x0 = Math.max(4, Math.min(996 - w, x0)); y0 = Math.max(4, Math.min(996 - h, y0));
+    o += '<rect class="rlp" x="' + f1(x0) + '" y="' + f1(y0) + '" width="' + f1(w) + '" height="' + f1(h) + '" rx="' + f1(h / 2) + '"/>' +
+      '<text class="rlt" x="' + f1(x0 + w / 2) + '" y="' + f1(y0 + h / 2 + fs * 0.35) + '" style="font-size:' + fs + 'px">' + esc(nm) + '</text>';
+  });
+  return o;
+}
+function roadsSVG(legs) { return svgWrap(roadsInner(legs, true)); }
+
 /* ---------- leg editor (used in setup + sheet) ---------- */
 function legEditor(box) {
+  fixAngles(S);
+  function drawPreview() { var pv = box.querySelector('.pv'); if (pv) pv.innerHTML = roadsSVG(sortedLegs()); }
   function draw() {
-    var legs = activeLegs();
-    box.innerHTML = legs.map(function (l, i) {
+    var legs = sortedLegs();
+    box.innerHTML = '<div class="pv"></div>' + legs.map(function (l) {
       return '<div class="legrow" data-id="' + l.id + '"><input class="ln" value="' + esc(l.name) + '" aria-label="Leg name">' +
-        '<button data-a="up"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
-        '<button data-a="down"' + (i === legs.length - 1 ? ' disabled' : '') + '>↓</button>' +
+        '<select class="la" aria-label="Direction this leg points">' + DIRS.map(function (d) { return '<option value="' + d.a + '"' + (d.a === l.angle ? ' selected' : '') + '>' + d.n + '</option>'; }).join('') + '</select>' +
         '<button data-a="del" class="del"' + (legs.length <= 3 ? ' disabled' : '') + '>✕</button></div>';
     }).join('') +
-      '<button data-a="add" class="ghost add">+ Add leg</button>' +
-      '<p class="hint">Keep legs in clockwise order around the intersection. Minimum 3 legs.</p>';
+      '<button data-a="add" class="ghost add"' + (legs.length >= MAX_LEGS ? ' disabled' : '') + '>+ Add leg</button>' +
+      '<p class="hint">Choose the direction each leg points on the diagram (N = top of the screen). The count screen, turns and crosswalks are drawn from this. 3 to ' + MAX_LEGS + ' legs.</p>';
+    drawPreview();
   }
   box.addEventListener('input', function (e) {
     if (!e.target.classList.contains('ln')) return;
-    var id = e.target.closest('.legrow').dataset.id;
-    var l = S.legs.find(function (x) { return x.id === id; });
-    if (l) { l.name = e.target.value; persist(); }
+    var id = e.target.closest('.legrow').dataset.id, l = S.legs.find(function (x) { return x.id === id; });
+    if (l) { l.name = e.target.value; persist(); drawPreview(); }
+  });
+  box.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('la')) return;
+    var id = e.target.closest('.legrow').dataset.id, l = S.legs.find(function (x) { return x.id === id; }), a = +e.target.value;
+    if (!l) return;
+    if (activeLegs().some(function (x) { return x.id !== id && x.angle === a; })) { toast('Another leg already points ' + dirOf(a).n); e.target.value = l.angle; return; }
+    l.angle = a; persist(); draw();
   });
   box.addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-a]'); if (!b) return;
-    var a = b.dataset.a;
-    if (a === 'add') {
-      S.legs.push({ id: uid(), name: 'Leg ' + (activeLegs().length + 1), removed: false });
+    var b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
+    if (b.dataset.a === 'add') {
+      var used = {}; activeLegs().forEach(function (x) { used[x.angle] = 1; });
+      var a = DIR_ORDER.find(function (x) { return !used[x]; }); if (a == null) return;
+      var nm = dirOf(a).f, taken = activeLegs().map(function (x) { return x.name; });
+      while (taken.indexOf(nm) >= 0) nm += ' 2';
+      S.legs.push({ id: uid(), name: nm, angle: a, removed: false });
     } else {
-      var id = b.closest('.legrow').dataset.id;
-      var idx = S.legs.findIndex(function (x) { return x.id === id; });
-      if (a === 'del') {
-        var used = S.events.some(function (ev) { return ev.from === id || ev.to === id; });
-        if (used && !confirm('"' + S.legs[idx].name + '" has recorded counts. They are kept in the data and exports, but the leg disappears from the count screen. Remove it?')) return;
-        if (used) S.legs[idx].removed = true; else S.legs.splice(idx, 1);
-      } else {
-        var dir = a === 'up' ? -1 : 1, j = idx + dir;
-        while (j >= 0 && j < S.legs.length && S.legs[j].removed) j += dir;
-        if (j < 0 || j >= S.legs.length) return;
-        var tmp = S.legs[idx]; S.legs[idx] = S.legs[j]; S.legs[j] = tmp;
-      }
+      var id = b.closest('.legrow').dataset.id, idx = S.legs.findIndex(function (x) { return x.id === id; });
+      if (idx < 0) return;
+      var usedEv = S.events.some(function (ev) { return ev.from === id || ev.to === id; });
+      if (usedEv && !confirm('"' + S.legs[idx].name + '" has recorded counts. They are kept in the data and exports, but the leg disappears from the count screen. Remove it?')) return;
+      if (usedEv) S.legs[idx].removed = true; else S.legs.splice(idx, 1);
     }
     persist(); draw();
   });
@@ -170,49 +248,72 @@ function renderSetup() {
   tick();
 }
 
-function legTag(n, k) {  // right / through / left hints for standard 4-leg intersections
-  if (n !== 4) return '';
-  return ['Right', 'Through', 'Left'][k] || '';
+function arrowIcon(h, dt) {   // bent arrow: arrives heading h, leaves heading dt
+  var L = 13, oy = -6, p0 = { x: -h.x * L, y: oy - h.y * L }, p2 = { x: dt.x * L, y: oy + dt.y * L };
+  var tip = { x: p2.x + dt.x * 5, y: p2.y + dt.y * 5 }, bx = tip.x - dt.x * 10, by = tip.y - dt.y * 10, qx = -dt.y * 7, qy = dt.x * 7;
+  return '<polyline class="ic" points="' + f1(p0.x) + ',' + f1(p0.y) + ' 0,' + oy + ' ' + f1(p2.x) + ',' + f1(p2.y) + '"/>' +
+    '<polygon class="ich" points="' + f1(tip.x) + ',' + f1(tip.y) + ' ' + f1(bx + qx) + ',' + f1(by + qy) + ' ' + f1(bx - qx) + ',' + f1(by - qy) + '"/>';
 }
-function mvBtn(k, from, to, label, tag, u) {
-  return '<button class="mv' + (u ? ' u' : '') + '" data-k="' + k + '" data-from="' + from + '" data-to="' + to + '">' +
-    '<span class="tag">' + esc(tag) + '</span><span class="lbl">' + esc(label) + '</span>' +
-    '<span class="n" data-key="' + k + '|' + from + '|' + to + '">0</span></button>';
+function uIcon(h) {
+  var a = Math.atan2(-h.x, h.y) * 180 / Math.PI;
+  return '<g transform="translate(0 -6) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
 }
-function cardsHTML(legs) {
-  var n = legs.length;
-  return legs.map(function (L, i) {
-    var title, inner = '';
-    if (mode === 'p') {
-      title = 'Crossing ' + L.name;
-      [legs[(i - 1 + n) % n], legs[(i + 1) % n]].forEach(function (D) { inner += mvBtn('p', L.id, D.id, '→ toward ' + D.name, '', false); });
-    } else {
-      title = 'From ' + L.name;
-      var k = mode === 'veh' ? 'v' : 'b';
-      for (var j = 1; j < n; j++) {            // counter-clockwise from the approach: right, through, left
-        var D = legs[(i - j + n) % n];
-        inner += mvBtn(k, L.id, D.id, '→ ' + D.name, legTag(n, j - 1), false);
-      }
-      inner += mvBtn(k, L.id, L.id, 'U-turn', '', true);
-    }
-    return '<section class="leg"><div class="ct">' + esc(title) + '</div><div class="mvs">' + inner + '</div></section>';
-  }).join('');
+function mvG(k, from, to, label, icon, x, y, f, extra) {
+  return '<g class="mv' + (extra || '') + '" data-k="' + k + '" data-from="' + from + '" data-to="' + to + '" transform="translate(' + f1(x) + ' ' + f1(y) + ') scale(' + (Math.round(f * 1000) / 1000) + ')">' +
+    '<rect class="bg" x="-44" y="-44" width="88" height="88" rx="16"/>' +
+    '<rect class="flash" x="-44" y="-44" width="88" height="88" rx="16"/>' +
+    '<rect class="rg0" x="-46" y="-46" width="92" height="92" rx="18"/><rect class="rg1" x="-46" y="-46" width="92" height="92" rx="18"/>' +
+    '<text class="lb" x="0" y="-27"' + (label.length > 7 ? ' style="font-size:' + Math.max(9, Math.floor(115 / label.length)) + 'px"' : '') + '>' + esc(label) + '</text>' + icon +
+    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text></g>';
+}
+
+function countSVG(legs, md) {
+  var n = legs.length, o = roadsInner(legs, false), k = md === 'veh' ? 'v' : 'b';
+  if (md === 'p') {
+    // crosswalk buttons: two walking directions per leg
+    legs.forEach(function (L, i) {
+      var th = L.angle * Math.PI / 180, d = uv(L.angle), t = { x: Math.cos(th), y: Math.sin(th) };   // t = clockwise walking direction
+      var sep = 47 / Math.max(Math.abs(t.x), Math.abs(t.y)), rc = cwR(L, legs);
+      [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]].forEach(function (pr) {
+        var dt = { x: t.x * pr[1], y: t.y * pr[1] };
+        o += mvG('p', L.id, pr[0].id, dirOf((L.angle + (pr[1] > 0 ? 90 : 270)) % 360).f.toUpperCase(), arrowIcon(dt, dt), 500 + d.x * rc + dt.x * sep, 500 + d.y * rc + dt.y * sep, 1, '');
+      });
+    });
+  } else {
+    // approach buttons sit in the lane that drives toward the junction (right-hand traffic)
+    legs.forEach(function (L) {
+      var d = uv(L.angle), right = { x: d.y, y: -d.x }, hd = { x: -d.x, y: -d.y };
+      var ex = legs.filter(function (g) { return g.id !== L.id; })
+        .map(function (D) { return { leg: D, turn: turnOf(L.angle, D.angle), u: false }; })
+        .sort(function (a, b) { return a.turn - b.turn; });
+      ex.push({ leg: L, turn: 180, u: true });
+      var cnt = ex.length, bs = Math.min(88, Math.floor(380 / cnt) - 6), f = bs / 88;
+      var m = Math.max(Math.abs(d.x), Math.abs(d.y)), step = (bs + 6) / m, r0 = 122 + (bs / 2 + 2) / m, lat = bs / 2 + 6;
+      ex.forEach(function (x, i) {
+        var r = r0 + i * step, cx = 500 + d.x * r + right.x * lat, cy = 500 + d.y * r + right.y * lat;
+        o += mvG(k, L.id, x.leg.id, x.u ? 'U-TURN' : turnLabel(x.turn), x.u ? uIcon(hd) : arrowIcon(hd, uv(x.leg.angle)), cx, cy, f, x.u ? ' u' : '');
+      });
+    });
+  }
+  o += '<g transform="translate(62 62)"><circle r="34" class="cmp"/><polygon class="cmpn" points="0,-24 9,10 0,4 -9,10"/><text class="cmpt" y="-38">N</text></g>';
+  return svgWrap(o);
 }
 
 function renderCount() {
-  var legs = activeLegs();
+  fixAngles(S);
+  var legs = sortedLegs();
   var colour = mode === 'veh' ? 'var(--' + cls + ')' : mode === 'b' ? 'var(--bike)' : 'var(--ped)';
   app.innerHTML =
-    '<header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
+    '<div class="cv"><header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
     '<div class="sub"><span id="clock"></span> · interval <b id="binlabel"></b></div></div>' +
     '<div class="tot"><span class="pill veh">Veh<b id="tv">0</b></span><span class="pill bike">Bike<b id="tb">0</b></span><span class="pill ped">Ped<b id="tp">0</b></span></div>' +
     '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button><button id="stop" class="hb stop">Stop</button></div>' +
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
     '<div id="banner"></div>' +
-    '<nav class="modes">' +
+    '<div class="cmain"><aside class="ctl"><nav class="modes">' +
     [['veh', 'Vehicles'], ['b', 'Bicycles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>' +
     (mode === 'veh' ? '<nav class="classes">' + [['car', 'Car'], ['truck', 'Truck'], ['bus', 'Bus']].map(function (c) { return '<button data-cls="' + c[0] + '"' + (cls === c[0] ? ' class="on"' : '') + '>' + c[1] + '</button>'; }).join('') + '</nav>' : '') +
-    '<main id="grid" class="grid" style="--c:' + colour + '">' + cardsHTML(legs) + '</main>';
+    '</aside><div class="stage' + (mode === 'p' ? ' pedmode' : '') + '" style="--c:' + colour + '">' + countSVG(legs, mode) + '</div></div></div>';
   keepAwake();
   tick();
 }
@@ -257,6 +358,8 @@ function describe(st, e) { return hhmm(e.t) + ' ' + kindLabel(e) + ' · ' + rout
 function updateLast(pulse) {
   var el = $('#last'); if (!el) return;
   var e = S.events[S.events.length - 1], box = $('#lasttxt');
+  app.querySelectorAll('.mv.lastb').forEach(function (m) { m.classList.remove('lastb'); });
+  if (e) { var lm = app.querySelector('.mv[data-k="' + e.k + '"][data-from="' + e.from + '"][data-to="' + e.to + '"]'); if (lm) lm.classList.add('lastb'); }
   if (!e) { box.innerHTML = '<span class="mut">Nothing counted yet</span>'; return; }
   var ago = Math.max(0, Math.round((Date.now() - e.t) / 1000));
   var agoTxt = ago < 60 ? ago + ' s ago' : Math.floor(ago / 60) + ' min ago';
@@ -425,6 +528,7 @@ function exportIntervals() {
     rows.push(['Peak hour factor', pk.phf == null ? '' : pk.phf.toFixed(3)]);
     rows.push(['Heavy vehicle share', pk.heavyPct == null ? '' : (pk.heavyPct * 100).toFixed(1) + '%']);
   } else rows.push(['Peak hour', 'n/a (fewer than 4 intervals)']);
+  rows.push([]); rows.push(['Legs (direction as drawn, N = top)'].concat(sortedLegs().map(function (l) { return l.name + ' (' + dirOf(l.angle).n + ')'; })));
   var ns = S.notes || [];
   if (ns.length) { rows.push([]); rows.push(['Notes']); rows.push(['Date', 'Time', 'Note']); ns.forEach(function (n) { rows.push([ymd(n.t), hhmm(n.t), n.text]); }); }
   share(fileBase() + '_intervals.csv', csv(rows));
@@ -437,12 +541,12 @@ function exportMovements() {
     var key = [bs, md, e.from, e.to, cl].join('|');
     agg[key] = (agg[key] || 0) + 1;
   });
-  var rows = [['Site', 'Date', 'Interval start', 'Interval end', 'Mode', 'From leg (crosswalk leg for pedestrians)', 'To leg (walking toward, for pedestrians)', 'Class', 'Count']];
+  var rows = [['Site', 'Date', 'Interval start', 'Interval end', 'Mode', 'From leg (crosswalk leg for pedestrians)', 'To leg (walking toward, for pedestrians)', 'Class', 'Count', 'Walking direction (pedestrians)']];
   Object.keys(agg).map(function (k) { return k.split('|'); })
     .sort(function (a, b) { return (a[0] - b[0]) || a[1].localeCompare(b[1]) || legNameOf(S, a[2]).localeCompare(legNameOf(S, b[2])) || legNameOf(S, a[3]).localeCompare(legNameOf(S, b[3])) || a[4].localeCompare(b[4]); })
     .forEach(function (p) {
       var bs = +p[0];
-      rows.push([S.site, ymd(bs), hhmm(bs), hhmm(bs + BIN), p[1], legNameOf(S, p[2]), p[2] === p[3] ? 'U-turn' : legNameOf(S, p[3]), p[4], agg[p.join('|')]]);
+      rows.push([S.site, ymd(bs), hhmm(bs), hhmm(bs + BIN), p[1], legNameOf(S, p[2]), p[2] === p[3] ? 'U-turn' : legNameOf(S, p[3]), p[4], agg[p.join('|')], p[1] === 'Pedestrian' ? walkDir(p[2], p[3]) : '']);
     });
   share(fileBase() + '_movements.csv', csv(rows));
 }
@@ -485,8 +589,8 @@ function openHistory() {
 
 /* ---------- events ---------- */
 app.addEventListener('click', function (e) {
+  var mvEl = e.target.closest('.mv'); if (mvEl) return tap(mvEl);
   var t = e.target.closest('button'); if (!t) return;
-  if (t.classList.contains('mv')) return tap(t);
   if (t.dataset.mode) { mode = t.dataset.mode; return render(); }
   if (t.dataset.cls) { cls = t.dataset.cls; return render(); }
   switch (t.id) {

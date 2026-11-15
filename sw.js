@@ -1,5 +1,5 @@
 // Network-first with cache fallback: updates arrive when online, app still opens offline.
-const CACHE = 'tmc-v2';
+const CACHE = 'tmc-v3';
 const ASSETS = ['./', './index.html', './app.js', './analysis.js', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
