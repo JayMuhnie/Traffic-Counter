@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '8 (15 Nov 2026)';
+var APP_VERSION = '9 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -628,20 +628,41 @@ function renderResults() {
 }
 
 /* ---------- export ---------- */
-/* delivering files: share sheet where available (iPad), otherwise a normal download */
-function shareFiles(items) {   // items: [{name, mime, blob}]
+/* delivering files: each file gets its own button, so every share/save is a direct tap (iOS requires that) */
+function saveOne(it) {   // plain download / open fallback
   try {
-    var files = items.map(function (it) { return new File([it.blob], it.name, { type: it.mime }); });
-    if (navigator.canShare && navigator.canShare({ files: files })) { navigator.share({ files: files, title: items[0].name }).catch(function () {}); return; }
+    var url = URL.createObjectURL(it.blob), a = document.createElement('a');
+    if ('download' in a) { a.href = url; a.download = it.name; document.body.appendChild(a); a.click(); a.remove(); toast('Saved ' + it.name + ' (see Downloads)'); }
+    else { window.open(url, '_blank'); }
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  } catch (e) { toast('Could not save: ' + (e && e.message || e)); }
+}
+function shareOne(it) {
+  var file = null;
+  try { file = new File([it.blob], it.name, { type: it.mime }); } catch (e) {}
+  try {
+    if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: it.name }).catch(function (err) { if (err && err.name === 'AbortError') return; saveOne(it); });
+      return;
+    }
   } catch (e) {}
-  items.forEach(function (it, i) {
-    setTimeout(function () {
-      var a = document.createElement('a');
-      if (!('download' in a)) { var rd = new FileReader(); rd.onload = function () { window.open(rd.result, '_blank'); }; rd.readAsDataURL(it.blob); return; }
-      a.href = URL.createObjectURL(it.blob); a.download = it.name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
-    }, i * 600);
+  saveOne(it);
+}
+function offerFiles(items, copyText) {
+  var rows = items.map(function (it, i) {
+    return '<div class="rrow"><div class="ri"><b>' + esc(it.name) + '</b><small>' + Math.max(1, Math.round(it.blob.size / 1024)) + ' KB</small></div>' +
+      '<button class="hb dark" data-a="share" data-i="' + i + '">Share / Save</button><a class="ghost lnk" data-i="' + i + '" target="_blank">Open</a></div>';
+  }).join('');
+  openSheet('Export', '<p class="hint">Tap a file to share it or save it to Files, email, AirDrop, etc.</p>' + rows + (copyText ? '<div class="row"><button class="ghost" data-a="copy">Copy summary as text</button></div>' : ''), function (box) {
+    var links = box.querySelectorAll('a.lnk');
+    for (var i = 0; i < links.length; i++) { try { links[i].href = URL.createObjectURL(items[+links[i].dataset.i].blob); } catch (e) {} }
+    box.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-a]'); if (!b) return;
+      if (b.dataset.a === 'share') shareOne(items[+b.dataset.i]);
+      else if (b.dataset.a === 'copy') {
+        try { navigator.clipboard.writeText(copyText).then(function () { toast('Copied'); }, function () { toast('Copy not allowed here'); }); } catch (e2) { toast('Copy not available'); }
+      }
+    });
   });
 }
 
@@ -748,9 +769,12 @@ function csv(rows) {
 }
 function fileBase() { return (S.site || 'count').replace(/[^\w\-]+/g, '_').slice(0, 40) + '_' + ymd(S.startedAt); }
 function exportCSVs() {
-  shareFiles(buildSheets().map(function (sh) {
-    return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['﻿' + csv(sh.rows)], { type: 'text/csv' }) };
-  }));
+  try {
+    var sheets = buildSheets();
+    offerFiles(sheets.map(function (sh) {
+      return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['\ufeff' + csv(sh.rows)], { type: 'text/csv' }) };
+    }), csv(sheets[0].rows));
+  } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
 }
 
 /* ---- minimal .xlsx writer (stored zip, no library, works offline) ---- */
@@ -803,7 +827,10 @@ function xlsxBlob(sheets) {
   return zipStore(files);
 }
 function exportExcel() {
-  shareFiles([{ name: fileBase() + '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', blob: xlsxBlob(buildSheets()) }]);
+  try {
+    var sheets = buildSheets();
+    offerFiles([{ name: fileBase() + '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', blob: xlsxBlob(sheets) }], csv(sheets[0].rows));
+  } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
 }
 
 /* ---------- study management ---------- */
