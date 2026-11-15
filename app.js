@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '13 (15 Nov 2026)';
+var APP_VERSION = '14 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -891,22 +891,78 @@ function Dg(ox, oy, sc) {   // diagram helper: unit space (0..1000) -> page poin
   return d;
 }
 function pt(a, v, k) { return { x: a.x + v.x * k, y: a.y + v.y * k }; }
-function drawArrow(D, ac, hd, dt, len, col, u) {   // arrives heading hd, leaves heading dt (unit vectors); u = U-turn
+function drawArrow(D, ac, hd, dt, len, col, u, hs) {
+  hs = hs || 1;   // arrives heading hd, leaves heading dt (unit vectors); u = U-turn
   var pts, tip, dir;
   if (u) {
     var rv = { x: -hd.y, y: hd.x }, a = pt(pt(ac, rv, 11), hd, -len), b = pt(pt(ac, rv, 11), hd, len * 0.7), c = pt(pt(ac, rv, -11), hd, len * 0.7), e = pt(pt(ac, rv, -11), hd, -len * 0.5);
     pts = [a, b, c, e]; dir = { x: -hd.x, y: -hd.y }; tip = e;
   } else { pts = [pt(ac, hd, -len), ac, pt(ac, dt, len)]; dir = dt; tip = pts[2]; }
   D.poly(pts.map(function (p) { return [p.x, p.y]; }), { stroke: col, sw: 1.6, close: false });
-  var pr = { x: -dir.y, y: dir.x }, h0 = pt(tip, dir, 11), h1 = pt(tip, pr, 7), h2 = pt(tip, pr, -7);
+  var pr = { x: -dir.y, y: dir.x }, h0 = pt(tip, dir, 11 * hs), h1 = pt(tip, pr, 7 * hs), h2 = pt(tip, pr, -7 * hs);
   D.poly([[h0.x, h0.y], [h1.x, h1.y], [h2.x, h2.y]], { fill: col });
 }
 function numFmt(n) { return String(n); }
 
-/* one diagram page (full count or peak hour) */
+/* ---- icons and the summary diagram (independent of the counting screen) ---- */
+function ring(D, x, y, r, col, sw) { var p = []; for (var i = 0; i < 14; i++) p.push([x + r * Math.cos(i * Math.PI / 7), y + r * Math.sin(i * Math.PI / 7)]); D.poly(p, { stroke: col, sw: sw || 0.9 }); }
+function iconBike(D, cx, cy, s, col) {   // s = width in D units
+  var P = function (x, y) { return [cx + x * s, cy + y * s]; };
+  ring(D, cx - 0.33 * s, cy + 0.12 * s, 0.2 * s, col); ring(D, cx + 0.33 * s, cy + 0.12 * s, 0.2 * s, col);
+  D.poly([P(-0.33, 0.12), P(-0.08, -0.2), P(0.2, -0.2), P(0.33, 0.12)], { stroke: col, sw: 0.9, close: false });
+  D.poly([P(-0.08, -0.2), P(0.02, 0.12), P(0.2, -0.2)], { stroke: col, sw: 0.9, close: false });
+  D.poly([P(0.2, -0.2), P(0.16, -0.34), P(0.26, -0.34)], { stroke: col, sw: 0.9, close: false });
+  D.line(cx - 0.18 * s, cy - 0.3 * s, cx - 0.02 * s, cy - 0.3 * s, { stroke: col, sw: 0.9 });
+}
+function iconPed(D, cx, cy, s, col) {   // s = height in D units
+  var P = function (x, y) { return [cx + x * s, cy + y * s]; };
+  ring(D, cx, cy - 0.38 * s, 0.1 * s, col);
+  D.poly([P(0, -0.26), P(0, 0.08)], { stroke: col, sw: 1, close: false });
+  D.poly([P(-0.2, -0.12), P(0, -0.2), P(0.2, -0.12)], { stroke: col, sw: 1, close: false });
+  D.poly([P(-0.16, 0.44), P(0, 0.08), P(0.16, 0.44)], { stroke: col, sw: 1, close: false });
+}
+function wrapTxt(s, size, bold, maxw) {
+  var words = String(s).split(' '), lines = [], line = '';
+  words.forEach(function (w) { if (line && tw(line + ' ' + w, size, bold) > maxw) { lines.push(line); line = w; } else line = line ? line + ' ' + w : w; });
+  if (line) lines.push(line); return lines;
+}
+function pctHeavy(mv) { var v = mv ? mv.car + mv.truck : 0; return v ? (mv.truck / v * 100).toFixed(1) + '% heavy' : '–'; }
+var DIR_SHORT = function (f) { for (var i = 0; i < DIRS.length; i++) if (DIRS[i].f === f) return DIRS[i].n; return ''; };
+
+function legendOps(x, y, w) {
+  var G = Dg(0, 0, 1), o = G.ops, k = 1;
+  o.push({ t: 'text', x: x, y: y, s: 'HOW TO READ THIS PAGE', size: 8, bold: true, color: '#0f172a' }); y += 12;
+  var item = function (drawSample, text, hh) {
+    drawSample(y);
+    var lines = wrapTxt(text, 7.2, false, w - 56);
+    lines.forEach(function (ln, i) { o.push({ t: 'text', x: x + 54, y: y + 8 + i * 9, s: ln, size: 7.2, color: '#334155' }); });
+    y += Math.max(hh, lines.length * 9 + 6);
+  };
+  item(function (yy) {
+    G.rect(x, yy, 48, 46, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 6 });
+    drawArrow(G, { x: x + 12, y: yy + 10 }, { x: 0, y: -1 }, { x: 1, y: 0 }, 5, '#1e3a8a', false, 0.5);
+    G.text(x + 33, yy + 14.5, '123', 10, { bold: true, color: '#0f172a', anchor: 'm' });
+    G.text(x + 24, yy + 26, '8.1% heavy', 6.2, { color: '#c2410c', anchor: 'm' });
+    iconBike(G, x + 14, yy + 37, 9, '#6d28d9'); G.text(x + 31, yy + 39.5, '4', 7, { bold: true, color: '#6d28d9', anchor: 'm' });
+  }, 'Vehicles making this movement (cars + heavy vehicles). The arrow shows the turn.', 54);
+  item(function (yy) { G.text(x + 23, yy + 9, '8.1% heavy', 7.5, { bold: true, color: '#c2410c', anchor: 'm' }); }, 'Share of those vehicles that were heavy vehicles (trucks and buses).', 20);
+  item(function (yy) { iconBike(G, x + 14, yy + 8, 14, '#6d28d9'); G.text(x + 32, yy + 11, '4', 9, { bold: true, color: '#6d28d9', anchor: 'm' }); }, 'Bicycles making this movement (not included in the vehicle numbers).', 24);
+  item(function (yy) {
+    G.rect(x, yy, 50, 24, { fill: '#f0fdfa', stroke: '#0f766e', sw: 0.9, r: 6 });
+    iconPed(G, x + 9, yy + 12, 12, '#115e59');
+    drawArrow(G, { x: x + 21, y: yy + 12 }, { x: 1, y: 0 }, { x: 1, y: 0 }, 3.5, '#115e59', false, 0.5);
+    G.text(x + 40, yy + 15.5, '12', 9, { bold: true, color: '#0f172a', anchor: 'm' });
+  }, 'Pedestrians crossing at that leg, walking in the direction of the arrow.', 32);
+  item(function (yy) {
+    G.rect(x, yy, 50, 22, { fill: '#0f172a', r: 5 });
+    G.text(x + 25, yy + 9, 'Street name', 6.2, { bold: true, color: '#ffffff', anchor: 'm' }); G.text(x + 25, yy + 17.5, 'Approach total: 171', 5, { bold: true, color: '#fde68a', anchor: 'm' });
+  }, 'Name of the street and the total vehicles entering the intersection from it.', 30);
+  return o;
+}
+
 function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak' | 'nopeak'
-  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = 0.496;
-  var V = volumesIn(M, i0, i1), D = Dg((PW - 1000 * sc) / 2, 84, sc);
+  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = 0.496, k = 1 / sc;
+  var V = volumesIn(M, i0, i1), D = Dg(212, 84, sc);
   D.rect(0, 0, 1000, 1000, { fill: '#dde7d6', stroke: '#94a3b8', sw: 0.8 });
   legs.forEach(function (L) {
     var d = uv(L.angle), q = { x: -d.y, y: d.x }, p1 = pt({ x: 500, y: 500 }, q, rw), p2 = pt(p1, d, 480), p3 = pt(pt({ x: 500, y: 500 }, q, -rw), d, 480), p4 = pt({ x: 500, y: 500 }, q, -rw);
@@ -916,100 +972,91 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
   D.poly(cp, { fill: '#4b5563' });
   legs.forEach(function (L) { var d = uv(L.angle), s = pt({ x: 500, y: 500 }, d, rw + 18), e = pt({ x: 500, y: 500 }, d, 480); D.line(s.x, s.y, e.x, e.y, { stroke: '#fbbf24', sw: 1, dash: [5, 4] }); });
 
-  var vehBox = function (c, w, h, hd, dt, mv, u) {
-    var vv = mv ? mv.car + mv.truck : 0;
-    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 12 });
-    drawArrow(D, { x: c.x, y: c.y - 20 }, hd, dt, 18, '#1e3a8a', u);
-    D.text(c.x, c.y + 28, numFmt(vv), 12, { bold: true, color: '#0f172a', anchor: 'm' });
-    bikeBadge(c.x + w / 2 - 6, c.y - h / 2 + 6, mv ? mv.bike : 0);
+  // one movement: arrow, vehicles, % heavy, bicycles
+  var card = function (c, w, h, hd, dt, mv, u) {
+    var vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0;
+    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 8 });
+    drawArrow(D, { x: c.x - 13 * k, y: c.y - 15 * k }, hd, dt, 5 * k, '#1e3a8a', u, 0.75);
+    D.text(c.x + 11 * k, c.y - 11 * k, String(vv), 11.5, { bold: true, color: '#0f172a', anchor: 'm' });
+    D.text(c.x, c.y + 3.6 * k, pctHeavy(mv), 6.6, { color: vv ? '#c2410c' : '#94a3b8', anchor: 'm' });
+    iconBike(D, c.x - 11 * k, c.y + 14.5 * k, 11 * k, bk ? '#6d28d9' : '#a8a29e');
+    D.text(c.x + 6 * k, c.y + 17.3 * k, String(bk), 8, { bold: true, color: bk ? '#6d28d9' : '#a8a29e', anchor: 'm' });
   };
-  var bikeBadge = function (x, y, nb) {
-    var cpts = []; for (var a = 0; a < 16; a++) cpts.push([x + 16 * Math.cos(a * Math.PI / 8), y + 16 * Math.sin(a * Math.PI / 8)]);
-    D.poly(cpts, nb ? { fill: '#7c3aed', stroke: '#fff', sw: 0.8 } : { fill: '#ede9fe', stroke: '#c4b5fd', sw: 0.8 });
-    D.text(x, y + 2.6 / sc, String(nb), 7, { bold: true, color: nb ? '#fff' : '#8b5cf6', anchor: 'm' });
+  var pedBox = function (c, vert, dt, np) {
+    var w = vert ? 66 : 150, h = vert ? 150 : 66;
+    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#f0fdfa', stroke: '#0f766e', sw: 0.9, r: 8 });
+    var o1 = vert ? { x: 0, y: -26 * k } : { x: -26 * k, y: 0 }, o2 = vert ? { x: 0, y: -4 * k } : { x: -4 * k, y: 0 }, o3 = vert ? { x: 0, y: 24 * k } : { x: 22 * k, y: 0 };
+    iconPed(D, c.x + o1.x, c.y + o1.y, 12 * k, '#115e59');
+    drawArrow(D, { x: c.x + o2.x, y: c.y + o2.y }, dt, dt, 6 * k, '#115e59', false, 0.8);
+    D.text(c.x + o3.x, c.y + o3.y + (vert ? 0 : 4 * k), String(np), 11, { bold: true, color: '#0f172a', anchor: 'm' });
   };
-  var pedBox = function (c, w, h, dt, np, vert) {
-    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ccfbf1', stroke: '#0d9488', sw: 1, r: 10 });
-    var ac = vert ? { x: c.x, y: c.y - h * 0.22 } : { x: c.x - w * 0.2, y: c.y };
-    drawArrow(D, ac, dt, dt, 16, '#115e59', false);
-    if (vert) D.text(c.x, c.y + h * 0.3, numFmt(np), 11, { bold: true, color: '#0f172a', anchor: 'm' });
-    else D.text(c.x + w * 0.22, c.y + 9, numFmt(np), 11, { bold: true, color: '#0f172a', anchor: 'm' });
-  };
+  var entering = function (L) { var s = 0; Object.keys(V.m).forEach(function (kk) { if (kk.split('>')[0] === L.id) s += V.m[kk].car + V.m[kk].truck; }); return s; };
 
   legs.forEach(function (L, i) {
     var d = uv(L.angle), right = { x: d.y, y: -d.x }, hd = { x: -d.x, y: -d.y }, th = L.angle * Math.PI / 180, t = { x: Math.cos(th), y: Math.sin(th) };
     var at = function (r, lam, vec) { return { x: 500 + d.x * r + vec.x * lam, y: 500 + d.y * r + vec.y * lam }; };
-    var nbs = [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]];
+    var nbs = [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]], ent = entering(L);
     if (panel) {
       var vert = Math.abs(d.x) > 0.5;
-      nbs.forEach(function (pr) { var dt = { x: t.x * pr[1], y: t.y * pr[1] }; pedBox(at(202, pr[1] * 78, t), vert ? 66 : 150, vert ? 150 : 66, dt, V.p[L.id + '>' + pr[0].id] || 0, vert); });
+      nbs.forEach(function (pr) { pedBox(at(190, pr[1] * 78, t), vert, { x: t.x * pr[1], y: t.y * pr[1] }, V.p[L.id + '>' + pr[0].id] || 0); });
       legs.forEach(function (Dl) {
         if (Dl.id === L.id) return;
         var tn = turnOf(L.angle, Dl.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0;
-        vehBox(at(287, lam, right), 96, 96, hd, uv(Dl.angle), V.m[L.id + '>' + Dl.id], false);
+        card(at(292, lam, right), 100, 100, hd, uv(Dl.angle), V.m[L.id + '>' + Dl.id], false);
       });
-      var pu = at(368, -96, right), uvert = vert;
-      var umv = V.m[L.id + '>' + L.id], uc = pu, uw = uvert ? 56 : 128, uh = uvert ? 128 : 56;
-      D.rect(uc.x - uw / 2, uc.y - uh / 2, uw, uh, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 10 });
-      drawArrow(D, uvert ? { x: uc.x, y: uc.y - 24 } : { x: uc.x - 28, y: uc.y }, hd, hd, 14, '#1e3a8a', true);
-      D.text(uvert ? uc.x : uc.x + 28, uvert ? uc.y + 36 : uc.y + 9, numFmt(umv ? umv.car + umv.truck : 0), 11, { bold: true, color: '#0f172a', anchor: 'm' });
-      bikeBadge(uc.x + uw / 2 - 4, uc.y - uh / 2 + 4, umv ? umv.bike : 0);
+      card(at(395, -96, right), 104, 84, hd, hd, V.m[L.id + '>' + L.id], true);
+      // street name and approach total, in the grass beside the end of the road
+      var l1 = fitTxt(L.name, 8.5, true, 150), l2 = 'Approach total: ' + ent;
+      var w = (Math.max(tw(l1, 8.5, true), tw(l2, 8, true)) + 14) / (sc), h = 27 / sc, sd = { x: -d.y, y: d.x };
+      var off = rw + 10 + Math.abs(sd.x) * w / 2 + Math.abs(sd.y) * h / 2, R = 470;
+      var cx = 500 + d.x * R + sd.x * off, cy = 500 + d.y * R + sd.y * off;
+      cx = Math.max(w / 2 + 4, Math.min(996 - w / 2, cx)); cy = Math.max(h / 2 + 4, Math.min(996 - h / 2, cy));
+      D.rect(cx - w / 2, cy - h / 2, w, h, { fill: '#0f172a', r: 8 * k });
+      D.text(cx, cy - 2.4 * k, l1, 8.5, { bold: true, color: '#ffffff', anchor: 'm' });
+      D.text(cx, cy + 9 * k, l2, 8, { bold: true, color: '#fde68a', anchor: 'm' });
     } else {
+      // dense layouts (5+ legs or diagonal legs): one small table per approach
       var ex = legs.filter(function (g) { return g.id !== L.id; }).map(function (g) { return { leg: g, turn: turnOf(L.angle, g.angle), u: false }; }).sort(function (a, b) { return a.turn - b.turn; });
       ex.push({ leg: L, turn: 180, u: true });
-      var cnt = ex.length, m = Math.max(Math.abs(d.x), Math.abs(d.y)), bs = 70, step, r0, lat;
-      for (; bs > 30; bs -= 2) { step = (bs + 3) / m; r0 = 122 + (bs / 2 + 2) / m; if (r0 + (cnt - 1) * step <= 452) break; }
-      lat = bs / 2 + 4;
-      ex.forEach(function (x, k) {
-        var c = at(r0 + k * step, lat, right);
-        var mv = V.m[L.id + '>' + x.leg.id], vv = mv ? mv.car + mv.truck : 0;
-        D.rect(c.x - bs / 2, c.y - bs / 2, bs, bs, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 10 });
-        drawArrow(D, { x: c.x, y: c.y - bs * 0.2 }, hd, uv(x.leg.angle), bs * 0.2, '#1e3a8a', x.u);
-        D.text(c.x, c.y + bs * 0.34, numFmt(vv), Math.max(6, Math.min(10, bs * sc * 0.4)), { bold: true, color: '#0f172a', anchor: 'm' });
-        bikeBadge(c.x + bs / 2 - 5, c.y - bs / 2 + 5, mv ? mv.bike : 0);
+      var bw = 132, rh = 12, bh = 26 + ex.length * rh + 14, bwU = bw * k, bhU = bh * k;
+      var bc = { x: 500 + d.x * 450, y: 500 + d.y * 450 };
+      bc.x = Math.max(bwU / 2 + 6, Math.min(994 - bwU / 2, bc.x)); bc.y = Math.max(bhU / 2 + 6, Math.min(994 - bhU / 2, bc.y));
+      var x0 = bc.x - bwU / 2, y0 = bc.y - bhU / 2, X = function (p) { return x0 + p * k; }, Y = function (p) { return y0 + p * k; };
+      D.rect(x0, y0, bwU, bhU, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 6 * k });
+      D.rect(x0, y0, bwU, 22 * k, { fill: '#0f172a', r: 6 * k });
+      D.text(X(bw / 2), Y(9.5), fitTxt(L.name + ' (' + dirOf(L.angle).n + ')', 8, true, bw - 8), 8, { bold: true, color: '#ffffff', anchor: 'm' });
+      D.text(X(bw / 2), Y(18.5), 'Approach total: ' + ent, 7, { bold: true, color: '#fde68a', anchor: 'm' });
+      ex.forEach(function (x, j) {
+        var mv = V.m[L.id + '>' + x.leg.id], vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0, yc = 26 + j * rh + 6;
+        drawArrow(D, { x: X(9), y: Y(yc) }, hd, uv(x.leg.angle), 3.6 * k, '#1e3a8a', x.u, 0.6);
+        D.text(X(18), Y(yc + 2.6), x.u ? 'U-turn' : cap(turnLabel(x.turn).toLowerCase()), 7, { color: '#334155' });
+        D.text(X(70), Y(yc + 3), String(vv), 8.5, { bold: true, color: '#0f172a', anchor: 'r' });
+        D.text(X(73), Y(yc + 2.6), pctHeavy(mv), 5.9, { color: vv ? '#c2410c' : '#94a3b8' });
+        iconBike(D, X(118), Y(yc), 8 * k, bk ? '#6d28d9' : '#a8a29e');
+        D.text(X(123.5), Y(yc + 2.6), String(bk), 7, { bold: true, color: bk ? '#6d28d9' : '#a8a29e' });
       });
-      var rc = cwR(L, legs);
-      nbs.forEach(function (pr) {
-        var c = at(rc, pr[1] * (rw + 26), t), cpts = [], np = V.p[L.id + '>' + pr[0].id] || 0;
-        for (var a2 = 0; a2 < 16; a2++) cpts.push([c.x + 22 * Math.cos(a2 * Math.PI / 8), c.y + 22 * Math.sin(a2 * Math.PI / 8)]);
-        D.poly(cpts, { fill: '#ccfbf1', stroke: '#0d9488', sw: 1 });
-        D.text(c.x, c.y + 3.5 / sc, numFmt(np), 8, { bold: true, color: '#0f172a', anchor: 'm' });
-      });
+      var yp = 26 + ex.length * rh + 8;
+      iconPed(D, X(9), Y(yp), 9 * k, '#115e59');
+      var ptxt = 'Crossing, walking ' + nbs.map(function (pr) { return DIR_SHORT(walkDir(L.id, pr[0].id)) + ' ' + (V.p[L.id + '>' + pr[0].id] || 0); }).join(' · ');
+      D.text(X(18), Y(yp + 2.6), fitTxt(ptxt, 6.6, false, bw - 22), 6.6, { color: '#0f172a' });
     }
-    // leg name + approach total (vehicles only), in the grass beside the end of the road
-    var ent = 0, entH = 0; Object.keys(V.m).forEach(function (k) { if (k.split('>')[0] === L.id) { ent += V.m[k].car + V.m[k].truck; entH += V.m[k].truck; } });
-    var l1 = fitTxt(L.name, 8.5, true, 118), l2 = 'Approach ' + ent + ' veh' + (ent ? ' · ' + (entH / ent * 100).toFixed(1) + '% heavy' : '');
-    var w = (Math.max(tw(l1, 8.5, true), tw(l2, 7.5, false)) + 12) / sc, h = 27 / sc, sd = { x: -d.y, y: d.x };
-    if (!panel) sd = { x: -right.x, y: -right.y };
-    var off = rw + 10 + Math.abs(sd.x) * w / 2 + Math.abs(sd.y) * h / 2, R = 470;
-    var cx = 500 + d.x * R + sd.x * off, cy = 500 + d.y * R + sd.y * off;
-    cx = Math.max(w / 2 + 4, Math.min(996 - w / 2, cx)); cy = Math.max(h / 2 + 4, Math.min(996 - h / 2, cy));
-    D.rect(cx - w / 2, cy - h / 2, w, h, { fill: '#0f172a', r: 8 / sc });
-    D.text(cx, cy - 2.2 / sc, l1, 8.5, { bold: true, color: '#ffffff', anchor: 'm' });
-    D.text(cx, cy + 8.6 / sc, l2, 7.5, { color: '#cbd5e1', anchor: 'm' });
   });
-  // compass
-  D.poly([[48, 40], [60, 80], [48, 72], [36, 80]], { fill: '#0f172a' }); D.text(48, 100 + 8, 'N', 8, { bold: true, color: '#0f172a', anchor: 'm' });
+  D.poly([[48, 40], [60, 80], [48, 72], [36, 80]], { fill: '#0f172a' }); D.text(48, 108, 'N', 8, { bold: true, color: '#0f172a', anchor: 'm' });
 
-  // totals in the middle of the junction
-  var T = V.tot, veh = T.car + T.truck, cw0 = panel ? 250 : 210, ch0 = panel ? 176 : 190;
-  D.rect(500 - cw0 / 2, 500 - ch0 / 2, cw0, ch0, { fill: '#ffffff', stroke: '#0f172a', sw: 1, r: 14 });
-  var cl = function (dy, txt, size, o) { D.text(500, 500 + dy / sc, txt, size, o); };
-  var top0 = -ch0 / 2 * sc;
-  cl(top0 + 13, mode === 'peak' ? 'PEAK HOUR · ALL VEHICLES' : mode === 'nopeak' ? 'ALL COUNTED · ALL VEHICLES' : 'FULL COUNT · ALL VEHICLES', 6.5, { color: '#64748b', bold: true, anchor: 'm' });
-  cl(top0 + 34, String(veh), 20, { bold: true, color: '#0f172a', anchor: 'm' });
-  cl(top0 + 49, 'Heavy vehicles ' + T.truck + ' (' + (veh ? (T.truck / veh * 100).toFixed(1) : '0.0') + '%)', 8, { bold: true, color: '#c2410c', anchor: 'm' });
-  var yy = 62;
-  if (panel) cl(top0 + yy, 'Bicycles ' + T.bike + '  ·  Pedestrians ' + T.ped, 7.5, { color: '#0f172a', anchor: 'm' });
-  else { cl(top0 + yy, 'Bicycles ' + T.bike, 7.5, { color: '#0f172a', anchor: 'm' }); yy += 11; cl(top0 + yy, 'Pedestrians ' + T.ped, 7.5, { color: '#0f172a', anchor: 'm' }); }
-  if (mode === 'peak' && M.pk && M.pk.phf != null) cl(top0 + yy + 13, 'Peak hour factor ' + M.pk.phf.toFixed(3), 7.5, { color: '#0f172a', anchor: 'm' });
+  // the time period, in the middle of the junction
+  var span = hhmm(M.bins[i0].start) + '–' + hhmm(M.bins[i1].start + BIN), cw0 = panel ? 250 : 230, ch0 = panel ? 140 : 150, top0 = -ch0 / 2 * sc;
+  D.rect(500 - cw0 / 2, 500 - ch0 / 2, cw0, ch0, { fill: '#ffffff', stroke: '#0f172a', sw: 1, r: 12 });
+  var cl = function (dy, txt, size, o) { D.text(500, 500 + dy * k, txt, size, o); };
+  cl(top0 + 16, mode === 'peak' ? 'PEAK HOUR' : mode === 'nopeak' ? 'ALL COUNTED' : 'FULL COUNT', 8, { color: '#64748b', bold: true, anchor: 'm' });
+  cl(top0 + 38, span, Math.min(19, (cw0 * sc - 14) / tw(span, 1, true)), { bold: true, color: '#0f172a', anchor: 'm' });
+  cl(top0 + 52, dayName(S.startedAt) + ' ' + ymd(S.startedAt), 7.5, { color: '#334155', anchor: 'm' });
+  if (mode === 'peak' && M.pk && M.pk.phf != null) cl(top0 + 64, 'Peak hour factor ' + M.pk.phf.toFixed(3), 7.5, { color: '#334155', anchor: 'm' });
 
   var ops = D.ops;
   ops.push({ t: 'text', x: 28, y: 33, s: title, size: 18, bold: true, color: '#0f172a' });
   lines.forEach(function (ln, i) { ops.push({ t: 'text', x: 28, y: 49 + i * 13, s: ln, size: 9.5, color: '#475569' }); });
-  var lg = 'Boxes: cars + heavy vehicles per movement (arrow shows the turn). Purple badge: bicycles making that movement. ' + (panel ? 'Teal boxes: pedestrians crossing in the arrow direction.' : 'Teal circles: pedestrians crossing at that leg, walking toward that side.');
-  if (S.legs.some(function (l) { return l.removed; })) lg += ' Counts on removed legs are in the totals but not drawn.';
-  ops.push({ t: 'text', x: PW / 2, y: 588, s: fitTxt(lg, 7, false, 736), size: 7, color: '#64748b', anchor: 'm' });
+  legendOps(28, 98, 128).forEach(function (p) { ops.push(p); });
+  if (S.legs.some(function (l) { return l.removed; })) ops.push({ t: 'text', x: PW - 28, y: 588, s: 'Movements on removed legs are not drawn.', size: 7, color: '#64748b', anchor: 'r' });
   return ops;
 }
 function volumesIn(M, i0, i1) {
