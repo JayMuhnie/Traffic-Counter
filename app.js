@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '5 (15 Nov 2026)';
+var APP_VERSION = '6 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -52,6 +52,9 @@ var H = load(LS_HIS, []);
 var mode = 'veh';          // 'veh' | 'p' (only used by the compact layout)
 var cls = 'car';           // car | truck (trucks and buses) | bike
 var clsLocked = false, lastClsTap = 0;
+var viewBin = null;        // null = live interval; otherwise start (ms) of an earlier interval being edited
+var rmMode = false, lastAct = 0;
+var IDLE_PAST = 60000, IDLE_RM = 20000;
 var alignStart = true;
 var view = S.startedAt ? (S.endedAt ? 'results' : 'count') : 'setup';
 
@@ -157,9 +160,28 @@ function roadsInner(legs, small, rw) {
     o += '</g>';
   });
   legs.forEach(function (L) {   // name tag at the end of each leg
-    var d = uv(L.angle), out = { x: -d.y, y: d.x }, fs = small ? 44 : 28, nm = shortTxt(L.name, 14);
+    var d = uv(L.angle), out = { x: -d.y, y: d.x }, fs = small ? 44 : 28, nm = shortTxt(L.name, 14), lines = null;
     var w = Math.min(nm.length * fs * 0.58 + 30, 340), h = fs + 16, x0, y0;
-    if (small || panel) { var rr = small ? 410 : 432; x0 = 500 + d.x * rr - w / 2; y0 = 500 + d.y * rr - h / 2; }
+    if (small) { x0 = 500 + d.x * 410 - w / 2; y0 = 500 + d.y * 410 - h / 2; }
+    else if (panel) {   // in the grass beside the end of the road (driver's left), clear of every button
+      var maxw = 316, lat = rw + 14, cpw = 0.58;
+      fs = 34; nm = shortTxt(L.name, 60);
+      if (nm.length * fs * cpw + 30 <= maxw) lines = [nm];
+      else {   // two lines at a readable size
+        var ws = nm.split(' '), best = null, bi;
+        for (bi = 1; bi < ws.length; bi++) { var l1 = ws.slice(0, bi).join(' '), l2 = ws.slice(bi).join(' '), mx = Math.max(l1.length, l2.length); if (!best || mx < best.mx) best = { a: l1, b: l2, mx: mx }; }
+        if (!best) best = { a: nm.slice(0, Math.ceil(nm.length / 2)), b: nm.slice(Math.ceil(nm.length / 2)), mx: Math.ceil(nm.length / 2) };
+        fs = Math.max(22, Math.min(30, Math.floor((maxw - 30) / (best.mx * cpw))));
+        var cap = Math.floor((maxw - 30) / (fs * cpw));
+        lines = [shortTxt(best.a, cap), shortTxt(best.b, cap)];
+      }
+      var ml = 0; lines.forEach(function (q) { ml = Math.max(ml, q.length); });
+      w = Math.min(ml * fs * cpw + 30, maxw); h = lines.length * fs * 1.12 + 16;
+      var sd = { x: -d.y, y: d.x };   // side of the road the name sits on
+      var cx = 500 + d.x * (496 - w / 2) + sd.x * (lat + w / 2) * Math.abs(sd.x), cy = 500 + d.y * (496 - h / 2) + sd.y * (lat + h / 2) * Math.abs(sd.y);
+      if (Math.abs(d.y) > 0.5) cx = 500 + sd.x * (lat + w / 2); else cy = 500 + sd.y * (lat + h / 2);
+      x0 = cx - w / 2; y0 = cy - h / 2;
+    }
     else {
       var px = 500 + d.x * 452 + out.x * 56, py = 500 + d.y * 452 + out.y * 56;
       x0 = Math.abs(d.x) < 0.2 ? (out.x > 0 ? 506 : 494 - w) : px - w / 2;
@@ -167,7 +189,7 @@ function roadsInner(legs, small, rw) {
     }
     x0 = Math.max(4, Math.min(996 - w, x0)); y0 = Math.max(4, Math.min(996 - h, y0));
     o += '<rect class="rlp" x="' + f1(x0) + '" y="' + f1(y0) + '" width="' + f1(w) + '" height="' + f1(h) + '" rx="' + f1(h / 2) + '"/>' +
-      '<text class="rlt" x="' + f1(x0 + w / 2) + '" y="' + f1(y0 + h / 2 + fs * 0.35) + '" style="font-size:' + fs + 'px">' + esc(nm) + '</text>';
+      (lines || [nm]).map(function (q, qi, arr) { return '<text class="rlt" x="' + f1(x0 + w / 2) + '" y="' + f1(y0 + h / 2 + fs * 0.35 + (qi - (arr.length - 1) / 2) * fs * 1.12) + '" style="font-size:' + fs + 'px">' + esc(q) + '</text>'; }).join('');
   });
   return o;
 }
@@ -232,7 +254,15 @@ function openSheet(title, html, mount) {
 }
 
 /* ---------- rendering ---------- */
+function fit() {
+  try { document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px'); } catch (e) {}
+}
+window.addEventListener('resize', fit);
+window.addEventListener('orientationchange', function () { fit(); setTimeout(fit, 300); });
+document.addEventListener('touchmove', function (e) { if (view === 'count' && !e.target.closest('#sheet')) e.preventDefault(); }, { passive: false });
 function render() {
+  fit();
+  document.documentElement.classList[view === 'count' ? 'add' : 'remove']('cvmode');
   if (view === 'setup') renderSetup();
   else if (view === 'count') renderCount();
   else renderResults();
@@ -366,7 +396,7 @@ function renderCount() {
   if (panel) mode = 'veh';
   app.innerHTML =
     '<div class="cv"><header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
-    '<div class="sub"><span id="clock"></span> · interval <b id="binlabel"></b></div></div>' +
+    '<div class="sub"><span id="clock"></span></div><div class="ivn"><button id="ivprev" class="hb sm">◀</button><b id="binlabel"></b><button id="ivnext" class="hb sm">▶</button><button id="ivlive" class="hb sm live">Live</button></div></div>' +
     '<div class="tot"><span class="pill veh">Veh<b id="tv">0</b></span><span class="pill bike">Bike<b id="tb">0</b></span><span class="pill ped">Ped<b id="tp">0</b></span></div>' +
     '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button><button id="stop" class="hb stop">Stop</button></div>' +
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
@@ -374,16 +404,17 @@ function renderCount() {
     '<div class="cmain"><aside class="ctl">' +
     (panel ? '' : '<nav class="modes">' + [['veh', 'Vehicles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>') +
     (panel || mode === 'veh' ? '<nav class="classes">' + clsBtnsHTML() + '</nav><p class="clshint">Truck/Bus and Bike count once, then go back to Car. Double-tap to keep one selected.</p>' : '') +
-    '</aside><div class="stage' + (!panel && mode === 'p' ? ' pedmode' : '') + '" style="--c:' + clsColour() + '">' + (panel ? panelSVG(legs) : countSVG(legs, mode)) + '</div></div></div>';
+    '<nav class="rmrow"><button id="rmbtn">− Remove counts</button></nav></aside><div class="stage' + (!panel && mode === 'p' ? ' pedmode' : '') + '" style="--c:' + clsColour() + '">' + (panel ? panelSVG(legs) : countSVG(legs, mode)) + '</div></div></div>';
   keepAwake();
   tick();
 }
 
 /* live counts for the current interval */
+function curBin() { return viewBin == null ? binStart(Date.now()) : viewBin; }
 function binCounts() {
-  var bs = binStart(Date.now()), m = {}, tot = { v: 0, b: 0, p: 0 };
+  var bs = curBin(), be = bs + BIN, m = {}, tot = { v: 0, b: 0, p: 0 };
   for (var i = S.events.length - 1; i >= 0; i--) {
-    var e = S.events[i]; if (e.t < bs) break;
+    var e = S.events[i]; if (e.t < bs || e.t >= be) continue;
     var key = e.k + '|' + e.from + '|' + e.to;
     m[key] = (m[key] || 0) + 1; tot[e.k]++;
   }
@@ -393,6 +424,8 @@ function tick() {
   var now = Date.now(), ah = $('#alignhint');
   if (ah) ah.textContent = alignStart ? 'Counting will begin at ' + hhmm(nextMark()) + '. Tapping Start before then is fine.' : 'Counting begins the moment you tap Start (the first interval may be partial).';
   if (view !== 'count') return;
+  if (viewBin != null && (viewBin >= binStart(now) || now - lastAct > IDLE_PAST)) { viewBin = null; rmMode = false; }
+  if (rmMode && now - lastAct > IDLE_RM) rmMode = false;
   var c = binCounts();
   app.querySelectorAll('.n').forEach(function (el) { el.textContent = c.m[el.dataset.key] || 0; });
   app.querySelectorAll('.bk').forEach(function (g) { var nb = c.m[g.dataset.bk] || 0; g.setAttribute('visibility', nb ? 'visible' : 'hidden'); g.querySelector('text').textContent = nb; });
@@ -401,7 +434,16 @@ function tick() {
   $('#binlabel').textContent = hhmm(c.bs) + '–' + hhmm(c.bs + BIN);
   $('#tv').textContent = c.tot.v; $('#tb').textContent = c.tot.b; $('#tp').textContent = c.tot.p;
   var left = S.startedAt - now;
-  $('#banner').textContent = left > 0 ? 'Count starts at ' + hhmm(S.startedAt) + ' — in ' + Math.floor(left / 60000) + ':' + pad(Math.floor(left / 1000) % 60) : '';
+  var msg = '';
+  if (left > 0) msg = 'Count starts at ' + hhmm(S.startedAt) + ' — in ' + Math.floor(left / 60000) + ':' + pad(Math.floor(left / 1000) % 60);
+  else if (rmMode) msg = 'REMOVE MODE — tap a button to take one count out of ' + hhmm(c.bs) + '–' + hhmm(c.bs + BIN);
+  else if (viewBin != null) msg = 'Editing an earlier interval (' + hhmm(c.bs) + '–' + hhmm(c.bs + BIN) + ') — taps are added to it. Back to live in ' + Math.max(0, Math.ceil((IDLE_PAST - (now - lastAct)) / 1000)) + ' s';
+  var bn = $('#banner'); bn.textContent = msg; bn.className = rmMode ? 'rmb' : '';
+  var stg = $('.stage'); if (stg) { stg.classList[viewBin != null ? 'add' : 'remove']('past'); stg.classList[rmMode ? 'add' : 'remove']('rm'); }
+  var rb = $('#rmbtn'); if (rb) { rb.classList[rmMode ? 'add' : 'remove']('on'); rb.textContent = rmMode ? 'Done removing' : '− Remove counts'; }
+  $('#ivprev').disabled = c.bs <= binStart(S.startedAt);
+  $('#ivnext').disabled = viewBin == null;
+  $('#ivlive').style.visibility = viewBin == null ? 'hidden' : 'visible';
   $('#undo').disabled = !S.events.length;
   updateLast(false);
 }
@@ -489,13 +531,37 @@ function tap(btn) {
   if (!S.startedAt || S.endedAt) return;
   var now = Date.now();
   if (now < S.startedAt) { toast('Count has not started yet'); return; }
+  if (rmMode) return removeOne(btn);
+  lastAct = now;
+  var past = viewBin != null && viewBin < binStart(now);
   var isVeh = btn.dataset.k === 'v';
-  var ev = { t: now, k: isVeh && cls === 'bike' ? 'b' : btn.dataset.k, from: btn.dataset.from, to: btn.dataset.to };
+  var ev = { t: past ? viewBin + BIN - 1 : now, k: isVeh && cls === 'bike' ? 'b' : btn.dataset.k, from: btn.dataset.from, to: btn.dataset.to };
   if (ev.k === 'v') ev.c = cls;
   S.events.push(ev); persist(); tick(); updateLast(true);
   sound(ev.k === 'v' ? ev.c : ev.k === 'b' ? 'bike' : 'ped');
   if (isVeh && !clsLocked && cls !== 'car') { cls = 'car'; applyCls(); }
   btn.classList.add('hit'); setTimeout(function () { btn.classList.remove('hit'); }, 110);
+}
+function ivNav(dir) {
+  var first = binStart(S.startedAt), nb = curBin() + dir * BIN;
+  if (nb < first) return;
+  viewBin = nb >= binStart(Date.now()) ? null : nb;
+  if (viewBin == null) rmMode = false;
+  lastAct = Date.now(); tick();
+}
+function removeOne(btn) {
+  var bs = curBin(), be = bs + BIN, k = btn.dataset.k, from = btn.dataset.from, to = btn.dataset.to;
+  var kinds = k === 'p' ? ['p'] : cls === 'bike' ? ['b', 'v'] : ['v', 'b'];
+  lastAct = Date.now();
+  for (var j = 0; j < kinds.length; j++) {
+    for (var i = S.events.length - 1; i >= 0; i--) {
+      var e = S.events[i];
+      if (e.k === kinds[j] && e.from === from && e.to === to && e.t >= bs && e.t < be) {
+        S.events.splice(i, 1); persist(); tick(); updateLast(false); sound('undo'); toast('Removed: ' + describe(S, e)); return;
+      }
+    }
+  }
+  toast('Nothing to remove there in this interval');
 }
 function undo() {
   var e = S.events.pop();
@@ -625,7 +691,7 @@ function archiveCurrent() {
 }
 function startNew() {
   archiveCurrent();
-  S = newStudy(S); persist(); mode = 'veh'; cls = 'car'; clsLocked = false; view = 'setup'; render();
+  S = newStudy(S); persist(); mode = 'veh'; cls = 'car'; clsLocked = false; viewBin = null; rmMode = false; view = 'setup'; render();
 }
 function openHistory() {
   function list() {
@@ -665,6 +731,10 @@ app.addEventListener('click', function (e) {
       audio(); S.startedAt = alignStart ? nextMark() : Date.now(); S.endedAt = null;
       persist(); view = 'count'; render(); break;
     case 'undo': undo(); break;
+    case 'ivprev': ivNav(-1); break;
+    case 'ivnext': ivNav(1); break;
+    case 'ivlive': viewBin = null; rmMode = false; lastAct = Date.now(); tick(); break;
+    case 'rmbtn': rmMode = !rmMode; lastAct = Date.now(); tick(); break;
     case 'recent': openRecent(); break;
     case 'notesbtn': case 'notesres': openNotes(); break;
     case 'snd': soundOn = !soundOn; try { localStorage.setItem(SOUND_KEY, soundOn ? '1' : '0'); } catch (e2) {} t.textContent = soundOn ? '🔊' : '🔇'; if (soundOn) sound('car'); break;
