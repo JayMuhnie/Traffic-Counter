@@ -5,7 +5,7 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 ## Deploy (Cloudflare Pages)
 1. Put these files at the root of a GitHub repo.
 2. Cloudflare Pages → Create project → connect the repo.
-3. Framework preset: **None**. Build command: *(empty)*. Output directory: `/`.
+3. Framework preset: **None**. Build command: *(empty)*. Output directory: `/`. (The `_headers` file makes Cloudflare re-check files on every load so updates arrive.)
 4. On each iPad, open the Pages URL in Safari → Share → **Add to Home Screen**. Open it once online so it caches; it then works offline.
    After an update, open the app once while online, then close it fully and reopen it.
 
@@ -23,3 +23,8 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - Data is stored in the browser's local storage on each iPad. Export the CSVs after each count.
 - Stop on a 15-minute mark for a clean last interval; partial first/last intervals are flagged in the results.
 - Right-hand traffic is assumed when placing the approach buttons.
+
+## If an iPad shows an old version
+- The setup screen shows the app version at the bottom. Compare it with the version you deployed.
+- Export any counts you want to keep first, then: Settings -> Safari -> Advanced -> Website Data -> delete the site (this erases the counts saved on that iPad). Remove the Home Screen icon, reopen the link in Safari, and add it to the Home Screen again.
+- From version 4 on, a new version installs itself the next time the app is opened online (it will not reload in the middle of a count).

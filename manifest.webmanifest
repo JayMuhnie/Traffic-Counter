@@ -2,7 +2,7 @@
   "name": "TMC Counter",
   "short_name": "TMC Counter",
   "description": "Intersection turning-movement counts with 15-minute intervals and peak hour.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

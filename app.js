@@ -4,6 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
+var APP_VERSION = '4 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -240,7 +241,7 @@ function renderSetup() {
     '<div class="card"><label class="chk"><input type="checkbox" id="align"' + (alignStart ? ' checked' : '') + '> Start at the next 15-minute mark</label><div class="hint" id="alignhint"></div></div>' +
     '<button class="big go" id="start">Start count</button>' +
     '<div class="row"><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div>' +
-    '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export the CSV files after each count.<br>To install: Safari → Share → Add to Home Screen.</p></div>';
+    '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export the CSV files after each count.<br>To install: Safari → Share → Add to Home Screen.<br>App version ' + APP_VERSION + '</p></div>';
   legEditor($('#legs'));
   $('#site').addEventListener('input', function (e) { S.site = e.target.value; persist(); });
   $('#obs').addEventListener('input', function (e) { S.observer = e.target.value; persist(); });
@@ -511,7 +512,9 @@ function share(name, text) {
     var file = new File([blob], name, { type: 'text/csv' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: name }).catch(function () {}); return; }
   } catch (e) {}
-  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  var a = document.createElement('a');
+  if (!('download' in a)) { window.open('data:text/csv;charset=utf-8,' + encodeURIComponent(text), '_blank'); return; }
+  a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
 }
@@ -617,5 +620,12 @@ app.addEventListener('click', function (e) {
 });
 
 render();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+if ('serviceWorker' in navigator) {
+  var hadCtl = !!navigator.serviceWorker.controller, reloaded = false;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) { try { reg.update(); } catch (e) {} }).catch(function () {});
+  navigator.serviceWorker.addEventListener('controllerchange', function () {   // a new version took over: reload, but never in the middle of a count
+    if (!hadCtl || reloaded || view === 'count') return;
+    reloaded = true; location.reload();
+  });
+}
 })();
