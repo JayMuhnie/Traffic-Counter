@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '6 (15 Nov 2026)';
+var APP_VERSION = '7 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -396,15 +396,14 @@ function renderCount() {
   if (panel) mode = 'veh';
   app.innerHTML =
     '<div class="cv"><header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
-    '<div class="sub"><span id="clock"></span></div><div class="ivn"><button id="ivprev" class="hb sm">◀</button><b id="binlabel"></b><button id="ivnext" class="hb sm">▶</button><button id="ivlive" class="hb sm live">Live</button></div></div>' +
+    '<div class="sub"><span id="clock"></span></div></div><div class="ivn"><button id="ivprev" class="hb sm">◀</button><b id="binlabel"></b><button id="ivnext" class="hb sm">▶</button><button id="ivlive" class="hb sm live">Live</button></div>' +
     '<div class="tot"><span class="pill veh">Veh<b id="tv">0</b></span><span class="pill bike">Bike<b id="tb">0</b></span><span class="pill ped">Ped<b id="tp">0</b></span></div>' +
     '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button><button id="stop" class="hb stop">Stop</button></div>' +
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
-    '<div id="banner"></div>' +
     '<div class="cmain"><aside class="ctl">' +
     (panel ? '' : '<nav class="modes">' + [['veh', 'Vehicles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>') +
     (panel || mode === 'veh' ? '<nav class="classes">' + clsBtnsHTML() + '</nav><p class="clshint">Truck/Bus and Bike count once, then go back to Car. Double-tap to keep one selected.</p>' : '') +
-    '<nav class="rmrow"><button id="rmbtn">− Remove counts</button></nav></aside><div class="stage' + (!panel && mode === 'p' ? ' pedmode' : '') + '" style="--c:' + clsColour() + '">' + (panel ? panelSVG(legs) : countSVG(legs, mode)) + '</div></div></div>';
+    '<nav class="rmrow"><button id="rmbtn">− Remove counts</button></nav></aside><div class="stage' + (!panel && mode === 'p' ? ' pedmode' : '') + '" style="--c:' + clsColour() + '">' + '<div id="banner"></div>' + (panel ? panelSVG(legs) : countSVG(legs, mode)) + '</div></div></div>';
   keepAwake();
   tick();
 }
