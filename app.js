@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '18 (15 Nov 2026)';
+var APP_VERSION = '19 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -47,7 +47,11 @@ function newStudy(prev) {
   };
 }
 function load(k, def) { try { var v = JSON.parse(localStorage.getItem(k)); return v || def; } catch (e) { return def; } }
-function persist() { try { localStorage.setItem(LS_CUR, JSON.stringify(S)); } catch (e) {} }
+var _pt = null;
+function persist() { if (_pt) { clearTimeout(_pt); _pt = null; } try { localStorage.setItem(LS_CUR, JSON.stringify(S)); } catch (e) {} }
+function persistSoon() { if (!_pt) _pt = setTimeout(function () { _pt = null; persist(); }, 600); }   // keeps taps fast: the save happens right after, and always before the app is hidden or closed
+window.addEventListener('pagehide', function () { if (_pt) persist(); });
+document.addEventListener('visibilitychange', function () { if (_pt && document.visibilityState !== 'visible') persist(); });
 function persistHist() { try { localStorage.setItem(LS_HIS, JSON.stringify(H)); } catch (e) {} }
 
 var S = load(LS_CUR, null) || newStudy();
@@ -125,14 +129,16 @@ function makeClip(notes) {
   dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); wr(36, 'data'); dv.setUint32(40, len * 2, true);
   for (i = 0; i < len; i++) dv.setInt16(44 + i * 2, pcm[i], true);
   var bin = ''; for (i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
-  var el = new Audio('data:audio/wav;base64,' + btoa(bin)); el.preload = 'auto'; try { el.load(); } catch (e) {}
-  return el;
+  var uri = 'data:audio/wav;base64,' + btoa(bin), pool = { a: [], i: 0 };
+  for (i = 0; i < 3; i++) { var el = new Audio(uri); el.preload = 'auto'; try { el.load(); } catch (e) {} pool.a.push(el); }
+  return pool;
 }
 function playClip(kind) {
   try {
     if (!window.Audio) return false;
-    var el = clips[kind] || (clips[kind] = makeClip(SOUNDS[kind]));
-    try { el.pause(); el.currentTime = 0; } catch (e) {}
+    var pool = clips[kind] || (clips[kind] = makeClip(SOUNDS[kind]));
+    var el = pool.a[pool.i]; pool.i = (pool.i + 1) % pool.a.length;   // rotate between copies so a tap never waits for the previous clip to rewind
+    try { if (el.currentTime > 0) el.currentTime = 0; } catch (e) {}
     var p = el.play();
     if (p && p.catch) p.catch(function () { playBeeps(kind); });
     return true;
@@ -585,8 +591,9 @@ function tap(btn) {
   var isVeh = btn.dataset.k === 'v';
   var ev = { t: past ? viewBin + BIN - 1 : now, k: isVeh && cls === 'bike' ? 'b' : btn.dataset.k, from: btn.dataset.from, to: btn.dataset.to };
   if (ev.k === 'v') ev.c = cls;
-  S.events.push(ev); persist(); tick(); updateLast(true);
-  sound(ev.k === 'v' ? ev.c : ev.k === 'b' ? 'bike' : 'ped');
+  S.events.push(ev); tick(); updateLast(true); persistSoon();
+  var snd = ev.k === 'v' ? ev.c : ev.k === 'b' ? 'bike' : 'ped';
+  setTimeout(function () { sound(snd); }, 0);   // after the count is shown, so audio can never hold up the next tap
   if (isVeh && !clsLocked && cls !== 'car') { cls = 'car'; applyCls(); }
   btn.classList.add('hit'); setTimeout(function () { btn.classList.remove('hit'); }, 110);
 }
@@ -614,7 +621,7 @@ function removeOne(btn) {
 function undo() {
   var e = S.events.pop();
   if (!e) { toast('Nothing to undo'); return; }
-  persist(); tick(); sound('undo'); toast('Removed: ' + describe(S, e));
+  persistSoon(); tick(); setTimeout(function () { sound('undo'); }, 0); toast('Removed: ' + describe(S, e));
 }
 
 /* ---------- results ---------- */
@@ -804,7 +811,7 @@ function exportModel() {
       var key = L.id + '>' + g.id; if (seen[key]) return; seen[key] = 1;
       if (!(act[L.id] && act[g.id]) && !usedP[key]) return;
       var wd = walkDir(L.id, g.id);
-      pcols.push({ k: 'p' + key, h1: first ? 'Crossing ' + head(L) : '', h2: wd ? 'Walking ' + wd : 'Toward ' + g.name }); first = false;
+      pcols.push({ k: 'p' + key, h1: first ? L.name + (L.removed ? ' (removed)' : '') + ' leg' : '', h2: wd ? wd : 'Toward ' + g.name }); first = false;
     });
   });
   return { A: A, pk: pk, bins: bins, mcols: mcols, pcols: pcols };
@@ -1337,8 +1344,18 @@ function openHistory() {
 }
 
 /* ---------- events ---------- */
+var lastTouch = 0;
+app.addEventListener('touchstart', function (e) {   // count on finger-down: no waiting for the finger to lift, and several fingers can tap at once
+  if (view !== 'count') return;
+  var hit = false;
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var el = e.changedTouches[i].target; el = el && el.closest ? el.closest('.mv') : null;
+    if (el) { hit = true; tap(el); }
+  }
+  if (hit) { lastTouch = Date.now(); if (e.cancelable) e.preventDefault(); }
+}, { passive: false });
 app.addEventListener('click', function (e) {
-  var mvEl = e.target.closest('.mv'); if (mvEl) return tap(mvEl);
+  var mvEl = e.target.closest('.mv'); if (mvEl) { if (Date.now() - lastTouch < 700) return; return tap(mvEl); }
   var t = e.target.closest('button'); if (!t) return;
   if (t.dataset.mode) { mode = t.dataset.mode; return render(); }
   if (t.dataset.pv != null && t.dataset.pv !== '') { pvTab = +t.dataset.pv; return render(); }

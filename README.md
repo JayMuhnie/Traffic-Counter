@@ -57,3 +57,7 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 ## v18
 - Results page: 15-minute interval table removed; action buttons are a symmetrical bar at the very top.
 - Bikes and Pedestrians tables (preview, Excel, CSV) now have an "Approach total" column after each leg.
+
+## v19
+- Pedestrian tables: group headers read "<street> leg"; sub-columns read West / East etc. (no "Walking").
+- Faster counting: a count registers on finger-down (several fingers can tap at once), the screen updates first, sound plays after (never blocks the next tap), saving to storage is batched (~0.6 s, and always flushed when the app is hidden/closed), and each sound rotates between 3 audio copies.
