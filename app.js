@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '19 (15 Nov 2026)';
+var APP_VERSION = '20 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -811,7 +811,7 @@ function exportModel() {
       var key = L.id + '>' + g.id; if (seen[key]) return; seen[key] = 1;
       if (!(act[L.id] && act[g.id]) && !usedP[key]) return;
       var wd = walkDir(L.id, g.id);
-      pcols.push({ k: 'p' + key, h1: first ? L.name + (L.removed ? ' (removed)' : '') + ' leg' : '', h2: wd ? wd : 'Toward ' + g.name }); first = false;
+      pcols.push({ k: 'p' + key, h1: first ? head(L) : '', h2: wd ? wd : 'Toward ' + g.name }); first = false;
     });
   });
   return { A: A, pk: pk, bins: bins, mcols: mcols, pcols: pcols };
@@ -849,11 +849,11 @@ function buildSheets() {
   var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? o[cls] : 0; }; };
   var withApp = function (cols, cls) {   // adds an "Approach total" column after each leg group
     var out = [], grp = [];
-    var flush = function () { if (!grp.length) return; var g = grp.slice(); out.push({ h1: '', h2: 'Approach total', fn: function (b) { var t = 0; g.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }); grp = []; };
+    var flush = function () { if (!grp.length) return; var g = grp.slice(); out.push({ h1: '', h2: 'Total', fn: function (b) { var t = 0; g.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }); grp = []; };
     cols.forEach(function (c) { if (c.h1) flush(); out.push(c); grp.push(c); });
     flush(); return out;
   };
-  var one = function (title, cols, cls, app) { return tableRows(M, title, app ? withApp(cols, cls) : cols, cell(cls), [{ h2: 'Total', fn: function (b) { var t = 0; cols.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }], false); };
+  var one = function (title, cols, cls, app) { return tableRows(M, title, app ? withApp(cols, cls) : cols, cell(cls), [{ h2: app ? 'Grand total' : 'Total', fn: function (b) { var t = 0; cols.forEach(function (c) { t += cell(cls)(b, c); }); return t; } }], false); };
   return [
     { name: 'Cars', rows: one('Cars — by movement', M.mcols, 'car'), file: 'cars' },
     { name: 'Heavy vehicles', rows: one('Heavy vehicles — by movement', M.mcols, 'truck'), file: 'heavy_vehicles' },

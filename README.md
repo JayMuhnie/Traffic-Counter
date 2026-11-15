@@ -61,3 +61,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 ## v19
 - Pedestrian tables: group headers read "<street> leg"; sub-columns read West / East etc. (no "Walking").
 - Faster counting: a count registers on finger-down (several fingers can tap at once), the screen updates first, sound plays after (never blocks the next tap), saving to storage is batched (~0.6 s, and always flushed when the app is hidden/closed), and each sound rotates between 3 audio copies.
+
+## v20
+- Pedestrian group headers match the other tables ("Bank Street (N)"). In Bikes and Pedestrians the per-leg column is "Total" and the last column is "Grand total".
