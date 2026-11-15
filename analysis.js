@@ -34,15 +34,21 @@
       else if (e.k === 'b') bin.bike++;
       else if (e.k === 'p') bin.ped++;
     });
-    bins.forEach(function (x) { x.veh = x.car + x.truck; });
+    // A "complete" interval was observed for its whole 15 minutes (a minute of tolerance at each end).
+    var endT = S.endedAt || (now || Date.now()), TOL = 60000, nFull = 0;
+    bins.forEach(function (x) { x.veh = x.car + x.truck; x.full = x.start + TOL >= S.startedAt && x.start + BIN <= endT + TOL; if (x.full) nFull++; });
 
     // Peak hour: best 4 consecutive intervals by total vehicles (cars + trucks + buses).
+    // Only windows made of four consecutive complete intervals qualify.
     var peak = null;
     if (bins.length >= 4) {
       for (var i = 0; i + 4 <= bins.length; i++) {
+        if (!(bins[i].full && bins[i + 1].full && bins[i + 2].full && bins[i + 3].full)) continue;
         var vol = bins[i].veh + bins[i + 1].veh + bins[i + 2].veh + bins[i + 3].veh;
         if (!peak || vol > peak.vol) peak = { i: i, vol: vol };
       }
+    }
+    if (peak) {
       var w = bins.slice(peak.i, peak.i + 4);
       var sum = function (key) { return w.reduce(function (s, x) { return s + x[key]; }, 0); };
       var maxBin = Math.max.apply(null, w.map(function (x) { return x.veh; }));
@@ -60,7 +66,7 @@
         m[e.c === 'bus' ? 'truck' : e.c]++; m.total++;
       });
     }
-    return { bins: bins, peak: peak, first: first, last: last };
+    return { bins: bins, peak: peak, first: first, last: last, nFull: nFull };
   }
 
   var api = { BIN: BIN, binStart: binStart, analyze: analyze };

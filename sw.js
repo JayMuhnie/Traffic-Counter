@@ -1,7 +1,7 @@
 // Network-first with an offline fallback.
 // Safari refuses to show a response that went through a redirect when a service worker serves it
 // (Cloudflare Pages redirects /index.html -> /), so any redirected response is rebuilt as a plain one.
-const CACHE = 'tmc-v12';
+const CACHE = 'tmc-v13';
 const ASSETS = ['./', 'app.js', 'analysis.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 function plain(res) {

@@ -4,12 +4,15 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '12 (15 Nov 2026)';
+var APP_VERSION = '13 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
 var hhmm = function (t) { var d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 var ymd = function (t) { var d = new Date(t); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+var WDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+var dayName = function (t) { return WDAYS[new Date(t).getDay()]; };
+var ymdw = function (t) { return dayName(t) + ', ' + ymd(t); };
 var cap = function (s) { return s.charAt(0).toUpperCase() + s.slice(1); };
 var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
 var pct = function (x) { return x == null ? '–' : (x * 100).toFixed(1) + '%'; };
@@ -37,7 +40,7 @@ function newStudy(prev) {
     ? prev.legs.filter(function (l) { return !l.removed; }).map(function (l) { return { name: l.name, angle: l.angle }; })
     : [{ name: 'North', angle: 0 }, { name: 'East', angle: 90 }, { name: 'South', angle: 180 }, { name: 'West', angle: 270 }];
   return {
-    id: uid(), site: prev ? prev.site : '', observer: prev ? prev.observer : '',
+    id: uid(), site: prev ? prev.site : '', observer: prev ? prev.observer : '', weather: '',
     created: Date.now(), startedAt: null, endedAt: null,
     legs: base.map(function (l) { return { id: uid(), name: l.name, angle: l.angle, removed: false }; }),
     events: [], notes: []
@@ -50,7 +53,7 @@ function persistHist() { try { localStorage.setItem(LS_HIS, JSON.stringify(H)); 
 var S = load(LS_CUR, null) || newStudy();
 var H = load(LS_HIS, []);
 var mode = 'veh';          // 'veh' | 'p' (only used by the compact layout)
-var cls = 'car';           // car | truck (trucks and buses) | bike
+var cls = 'car';           // car | truck (heavy vehicles: trucks and buses) | bike
 var clsLocked = false, lastClsTap = 0;
 var viewBin = null;        // null = live interval; otherwise start (ms) of an earlier interval being edited
 var rmMode = false, lastAct = 0;
@@ -273,7 +276,8 @@ function renderSetup() {
   app.innerHTML =
     '<div class="page"><h1>New traffic count</h1>' +
     '<div class="card"><label>Site / intersection<input id="site" type="text" value="' + esc(S.site) + '" placeholder="e.g. Bank St @ Gladstone Ave"></label>' +
-    '<label>Observer<input id="obs" type="text" value="' + esc(S.observer) + '" placeholder="Your name"></label></div>' +
+    '<label>Observer<input id="obs" type="text" value="' + esc(S.observer) + '" placeholder="Your name"></label>' +
+    '<label>Weather conditions<input id="wx" type="text" value="' + esc(S.weather || '') + '" placeholder="e.g. Sunny, dry, 5°C"></label></div>' +
     '<div class="card"><h2>Legs</h2><div id="legs"></div></div>' +
     '<div class="card"><label class="chk"><input type="checkbox" id="align"' + (alignStart ? ' checked' : '') + '> Start at the next 15-minute mark</label><div class="hint" id="alignhint"></div></div>' +
     '<button class="big go" id="start">Start count</button>' +
@@ -282,6 +286,7 @@ function renderSetup() {
   legEditor($('#legs'));
   $('#site').addEventListener('input', function (e) { S.site = e.target.value; persist(); });
   $('#obs').addEventListener('input', function (e) { S.observer = e.target.value; persist(); });
+  $('#wx').addEventListener('input', function (e) { S.weather = e.target.value; persist(); });
   $('#align').addEventListener('change', function (e) { alignStart = e.target.checked; tick(); });
   tick();
 }
@@ -370,8 +375,8 @@ function panelSVG(legs) {
   return svgWrap(o + COMPASS);
 }
 
-/* class selector: Truck/Bus and Bike count once, then fall back to Car; double-tap keeps one selected */
-var CLS_LABEL = { car: 'Car', truck: 'Truck/Bus', bike: 'Bike' };
+/* class selector: Heavy vehicle and Bike count once, then fall back to Car; double-tap keeps one selected */
+var CLS_LABEL = { car: 'Car', truck: 'Heavy vehicle', bike: 'Bike' };
 function clsColour() { return cls === 'truck' ? 'var(--truck)' : cls === 'bike' ? 'var(--bike)' : 'var(--car)'; }
 function clsBtnsHTML() {
   return ['car', 'truck', 'bike'].map(function (c) {
@@ -402,7 +407,7 @@ function renderCount() {
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
     '<div class="cmain"><aside class="ctl">' +
     (panel ? '' : '<nav class="modes">' + [['veh', 'Vehicles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>') +
-    (panel || mode === 'veh' ? '<nav class="classes">' + clsBtnsHTML() + '</nav><p class="clshint">Truck/Bus and Bike count once, then go back to Car. Double-tap to keep one selected.</p>' : '') +
+    (panel || mode === 'veh' ? '<nav class="classes">' + clsBtnsHTML() + '</nav><p class="clshint">Heavy vehicle and Bike count once, then go back to Car. Double-tap to keep one selected.</p>' : '') +
     '<nav class="rmrow"><button id="rmbtn">− Remove counts</button></nav></aside><div class="stage' + (!panel && mode === 'p' ? ' pedmode' : '') + '" style="--c:' + clsColour() + '">' + '<div id="banner"></div>' + (panel ? panelSVG(legs) : countSVG(legs, mode)) + '</div></div></div>';
   keepAwake();
   tick();
@@ -449,7 +454,7 @@ function tick() {
 setInterval(tick, 1000);
 
 var hms = function (t) { var d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
-function kindLabel(e) { return e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Truck/Bus') : e.k === 'b' ? 'Bike' : 'Pedestrian'; }
+function kindLabel(e) { return e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Heavy vehicle') : e.k === 'b' ? 'Bike' : 'Pedestrian'; }
 function chipCls(e) { return e.k === 'v' ? (e.c === 'car' ? 'car' : 'truck') : e.k === 'b' ? 'bike' : 'ped'; }
 function routeLabel(st, e) {
   if (e.k === 'p') return 'Crossing ' + legNameOf(st, e.from) + ' → toward ' + legNameOf(st, e.to);
@@ -479,7 +484,7 @@ function openRecent() {
     for (var i = n - 1; i >= 0 && out.length < 25; i--) {
       var e = S.events[i];
       out.push('<div class="rrow" data-i="' + i + '"><div class="ri"><span class="chip ' + chipCls(e) + '">' + esc(kindLabel(e)) + '</span>' + esc(routeLabel(S, e)) + '<small>' + hms(e.t) + '</small></div>' +
-        (e.k === 'v' ? '<div class="cs">' + ['car', 'truck'].map(function (c) { return '<button class="cb' + ((e.c === c || (c === 'truck' && e.c === 'bus')) ? ' on' : '') + '" data-a="cls" data-c="' + c + '">' + (c === 'car' ? 'Car' : 'Truck/Bus') + '</button>'; }).join('') + '</div>' : '') +
+        (e.k === 'v' ? '<div class="cs">' + ['car', 'truck'].map(function (c) { return '<button class="cb' + ((e.c === c || (c === 'truck' && e.c === 'bus')) ? ' on' : '') + '" data-a="cls" data-c="' + c + '">' + (c === 'car' ? 'Car' : 'Heavy') + '</button>'; }).join('') + '</div>' : '') +
         '<button class="ghost del" data-a="del">✕</button></div>');
     }
     return '<p class="hint">Most recent first (last 25). Change the class or remove a miscount.</p>' + out.join('');
@@ -599,13 +604,13 @@ function renderResults() {
   if (running) warns.push('Count still in progress — the current interval is incomplete.');
   if (binStart(S.startedAt) !== S.startedAt) warns.push('Count started at ' + hhmm(S.startedAt) + ', so the first interval is partial.');
   if (S.endedAt && Math.abs(binStart(S.endedAt) - S.endedAt) > 5000 && Math.abs(binStart(S.endedAt) + BIN - S.endedAt) > 5000) warns.push('Count stopped at ' + hhmm(S.endedAt) + ', so the last interval is partial.');
-  if (!pk) warns.push('Peak hour needs at least four 15-minute intervals (one full hour).');
+  if (!pk) warns.push('No peak hour yet: it needs four complete 15-minute intervals in a row (one full hour). Complete intervals so far: ' + A.nFull + '. Partial first or last intervals do not count.');
 
   var peakKpis = pk ?
     '<div class="kpi"><small>Peak hour</small><b>' + hhmm(pk.start) + '–' + hhmm(pk.end) + '</b></div>' +
     '<div class="kpi"><small>Peak-hour vehicles</small><b>' + pk.vol + '</b></div>' +
     '<div class="kpi"><small>Peak hour factor</small><b>' + (pk.phf == null ? '–' : pk.phf.toFixed(2)) + '</b></div>' +
-    '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' trucks/buses</small></div>' +
+    '<div class="kpi"><small>Heavy vehicles</small><b>' + pct(pk.heavyPct) + '</b><small>' + pk.truck + ' heavy vehicles</small></div>' +
     '<div class="kpi"><small>Bikes / peds in peak</small><b>' + pk.bike + ' / ' + pk.ped + '</b></div>' : '';
 
   var rows = A.bins.map(function (b, i) {
@@ -615,10 +620,10 @@ function renderResults() {
 
   app.innerHTML =
     '<div class="page"><h1>' + esc(S.site || 'Untitled count') + '</h1>' +
-    '<p class="hint">' + ymd(S.startedAt) + (S.observer ? ' · ' + esc(S.observer) : '') + '</p>' +
+    '<p class="hint">' + ymdw(S.startedAt) + (S.observer ? ' · ' + esc(S.observer) : '') + (S.weather ? ' · ' + esc(S.weather) : '') + '</p>' +
     warns.map(function (w) { return '<div class="warn">' + esc(w) + '</div>'; }).join('') +
     '<div class="kpis">' + peakKpis + '</div>' +
-    '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Truck/Bus</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
+    '<div class="card"><h2>15-minute intervals</h2><p class="hint">Highlighted rows are the peak hour.</p><div class="scroll"><table><thead><tr><th>Interval</th><th>Car</th><th>Heavy vehicle</th><th>Vehicles</th><th>Bike</th><th>Ped</th></tr></thead><tbody>' + rows +
     '</tbody><tfoot><tr><td>Total</td><td>' + tot.car + '</td><td>' + tot.truck + '</td><td>' + tot.veh + '</td><td>' + tot.bike + '</td><td>' + tot.ped + '</td></tr></tfoot></table></div></div>' +
     matrixHTML(A, S) +
     notesCardHTML() +
@@ -772,9 +777,9 @@ function tableRows(M, title, cols, fn, extras, peakRow) {
 function buildSheets() {
   var M = exportModel(), pk = M.pk;
   var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? (cls === 'veh' ? o.car + o.truck : o[cls]) : 0; }; };
-  var info = [['Site', S.site || ''], ['Date', ymd(S.startedAt)], ['Observer', S.observer || ''],
-    ['Peak hour (whole intersection, cars + trucks/buses)', pk ? hhmm(pk.start) + '–' + hhmm(pk.end) + ' · ' + pk.vol + ' vehicles' : 'n/a (fewer than 4 intervals)'], []];
-  var sum = info.concat(tableRows(M, 'Summary — cars + trucks/buses by movement', M.mcols, cell('veh'), [
+  var info = [['Site', S.site || ''], ['Date', ymdw(S.startedAt)], ['Observer', S.observer || ''], ['Weather', S.weather || ''],
+    ['Peak hour (whole intersection, cars + heavy vehicles)', pk ? hhmm(pk.start) + '–' + hhmm(pk.end) + ' · ' + pk.vol + ' vehicles' : 'n/a (needs four complete 15-minute intervals in a row; ' + M.A.nFull + ' complete)'], []];
+  var sum = info.concat(tableRows(M, 'Summary — cars + heavy vehicles by movement', M.mcols, cell('veh'), [
     { h2: 'Total vehicles', fn: function (b) { return b.veh; } },
     { h2: 'Bicycles', fn: function (b) { return b.bike; } },
     { h2: 'Pedestrians', fn: function (b) { return b.ped; } },
@@ -788,7 +793,7 @@ function buildSheets() {
   if (ns.length) { sum.push([]); var nh = ['Notes']; nh.b = true; sum.push(nh); sum.push(['Date', 'Time', 'Note']); ns.forEach(function (n) { sum.push([ymd(n.t), hhmm(n.t), n.text]); }); }
 
   var veh = tableRows(M, 'Cars', M.mcols, cell('car'), [{ h2: 'Total', fn: function (b) { return b.car; } }], false)
-    .concat([[]], tableRows(M, 'Trucks / buses', M.mcols, cell('truck'), [{ h2: 'Total', fn: function (b) { return b.truck; } }], false));
+    .concat([[]], tableRows(M, 'Heavy vehicles', M.mcols, cell('truck'), [{ h2: 'Total', fn: function (b) { return b.truck; } }], false));
   var oth = tableRows(M, 'Bicycles — by movement', M.mcols, cell('bike'), [{ h2: 'Total', fn: function (b) { return b.bike; } }], false)
     .concat([[]], tableRows(M, 'Pedestrians — by crosswalk and walking direction', M.pcols, cell('ped'), [{ h2: 'Total', fn: function (b) { return b.ped; } }], false));
   return [{ name: 'Summary', rows: sum, file: 'summary' }, { name: 'Vehicles', rows: veh, file: 'vehicles' }, { name: 'Bikes and Peds', rows: oth, file: 'bikes_peds' }];
@@ -899,9 +904,9 @@ function drawArrow(D, ac, hd, dt, len, col, u) {   // arrives heading hd, leaves
 function numFmt(n) { return String(n); }
 
 /* one diagram page (full count or peak hour) */
-function diagramPage(M, i0, i1, title, sub, isPeak) {
-  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = 0.5;
-  var V = volumesIn(M, i0, i1), D = Dg(28, 64, sc);
+function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak' | 'nopeak'
+  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = 0.496;
+  var V = volumesIn(M, i0, i1), D = Dg((PW - 1000 * sc) / 2, 84, sc);
   D.rect(0, 0, 1000, 1000, { fill: '#dde7d6', stroke: '#94a3b8', sw: 0.8 });
   legs.forEach(function (L) {
     var d = uv(L.angle), q = { x: -d.y, y: d.x }, p1 = pt({ x: 500, y: 500 }, q, rw), p2 = pt(p1, d, 480), p3 = pt(pt({ x: 500, y: 500 }, q, -rw), d, 480), p4 = pt({ x: 500, y: 500 }, q, -rw);
@@ -916,12 +921,12 @@ function diagramPage(M, i0, i1, title, sub, isPeak) {
     D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 12 });
     drawArrow(D, { x: c.x, y: c.y - 20 }, hd, dt, 18, '#1e3a8a', u);
     D.text(c.x, c.y + 28, numFmt(vv), 12, { bold: true, color: '#0f172a', anchor: 'm' });
-    if (mv && mv.bike) bikeBadge(c.x + w / 2 - 6, c.y - h / 2 + 6, mv.bike);
+    bikeBadge(c.x + w / 2 - 6, c.y - h / 2 + 6, mv ? mv.bike : 0);
   };
   var bikeBadge = function (x, y, nb) {
-    var cpts = []; for (var a = 0; a < 16; a++) cpts.push([x + 15 * Math.cos(a * Math.PI / 8), y + 15 * Math.sin(a * Math.PI / 8)]);
-    D.poly(cpts, { fill: '#7c3aed', stroke: '#fff', sw: 0.8 });
-    D.text(x, y + 4.5 / sc * 0.5, String(nb), 7, { bold: true, color: '#fff', anchor: 'm' });
+    var cpts = []; for (var a = 0; a < 16; a++) cpts.push([x + 16 * Math.cos(a * Math.PI / 8), y + 16 * Math.sin(a * Math.PI / 8)]);
+    D.poly(cpts, nb ? { fill: '#7c3aed', stroke: '#fff', sw: 0.8 } : { fill: '#ede9fe', stroke: '#c4b5fd', sw: 0.8 });
+    D.text(x, y + 2.6 / sc, String(nb), 7, { bold: true, color: nb ? '#fff' : '#8b5cf6', anchor: 'm' });
   };
   var pedBox = function (c, w, h, dt, np, vert) {
     D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ccfbf1', stroke: '#0d9488', sw: 1, r: 10 });
@@ -948,7 +953,7 @@ function diagramPage(M, i0, i1, title, sub, isPeak) {
       D.rect(uc.x - uw / 2, uc.y - uh / 2, uw, uh, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 10 });
       drawArrow(D, uvert ? { x: uc.x, y: uc.y - 24 } : { x: uc.x - 28, y: uc.y }, hd, hd, 14, '#1e3a8a', true);
       D.text(uvert ? uc.x : uc.x + 28, uvert ? uc.y + 36 : uc.y + 9, numFmt(umv ? umv.car + umv.truck : 0), 11, { bold: true, color: '#0f172a', anchor: 'm' });
-      if (umv && umv.bike) bikeBadge(uc.x + uw / 2 - 4, uc.y - uh / 2 + 4, umv.bike);
+      bikeBadge(uc.x + uw / 2 - 4, uc.y - uh / 2 + 4, umv ? umv.bike : 0);
     } else {
       var ex = legs.filter(function (g) { return g.id !== L.id; }).map(function (g) { return { leg: g, turn: turnOf(L.angle, g.angle), u: false }; }).sort(function (a, b) { return a.turn - b.turn; });
       ex.push({ leg: L, turn: 180, u: true });
@@ -961,7 +966,7 @@ function diagramPage(M, i0, i1, title, sub, isPeak) {
         D.rect(c.x - bs / 2, c.y - bs / 2, bs, bs, { fill: '#dbeafe', stroke: '#2563eb', sw: 1, r: 10 });
         drawArrow(D, { x: c.x, y: c.y - bs * 0.2 }, hd, uv(x.leg.angle), bs * 0.2, '#1e3a8a', x.u);
         D.text(c.x, c.y + bs * 0.34, numFmt(vv), Math.max(6, Math.min(10, bs * sc * 0.4)), { bold: true, color: '#0f172a', anchor: 'm' });
-        if (mv && mv.bike) bikeBadge(c.x + bs / 2 - 5, c.y - bs / 2 + 5, mv.bike);
+        bikeBadge(c.x + bs / 2 - 5, c.y - bs / 2 + 5, mv ? mv.bike : 0);
       });
       var rc = cwR(L, legs);
       nbs.forEach(function (pr) {
@@ -971,44 +976,40 @@ function diagramPage(M, i0, i1, title, sub, isPeak) {
         D.text(c.x, c.y + 3.5 / sc, numFmt(np), 8, { bold: true, color: '#0f172a', anchor: 'm' });
       });
     }
-    // leg name, in the grass beside the end of the road
-    var nm = fitTxt(L.name, 8.5, true, 112), w = (tw(nm, 8.5, true) + 12) / sc, h = 15 / sc, sd = { x: -d.y, y: d.x };
+    // leg name + approach total (vehicles only), in the grass beside the end of the road
+    var ent = 0, entH = 0; Object.keys(V.m).forEach(function (k) { if (k.split('>')[0] === L.id) { ent += V.m[k].car + V.m[k].truck; entH += V.m[k].truck; } });
+    var l1 = fitTxt(L.name, 8.5, true, 118), l2 = 'Approach ' + ent + ' veh' + (ent ? ' · ' + (entH / ent * 100).toFixed(1) + '% heavy' : '');
+    var w = (Math.max(tw(l1, 8.5, true), tw(l2, 7.5, false)) + 12) / sc, h = 27 / sc, sd = { x: -d.y, y: d.x };
     if (!panel) sd = { x: -right.x, y: -right.y };
     var off = rw + 10 + Math.abs(sd.x) * w / 2 + Math.abs(sd.y) * h / 2, R = 470;
     var cx = 500 + d.x * R + sd.x * off, cy = 500 + d.y * R + sd.y * off;
     cx = Math.max(w / 2 + 4, Math.min(996 - w / 2, cx)); cy = Math.max(h / 2 + 4, Math.min(996 - h / 2, cy));
-    D.rect(cx - w / 2, cy - h / 2, w, h, { fill: '#0f172a', r: h / 2 });
-    D.text(cx, cy + 3 / sc, nm, 8.5, { bold: true, color: '#ffffff', anchor: 'm' });
+    D.rect(cx - w / 2, cy - h / 2, w, h, { fill: '#0f172a', r: 8 / sc });
+    D.text(cx, cy - 2.2 / sc, l1, 8.5, { bold: true, color: '#ffffff', anchor: 'm' });
+    D.text(cx, cy + 8.6 / sc, l2, 7.5, { color: '#cbd5e1', anchor: 'm' });
   });
   // compass
   D.poly([[48, 40], [60, 80], [48, 72], [36, 80]], { fill: '#0f172a' }); D.text(48, 100 + 8, 'N', 8, { bold: true, color: '#0f172a', anchor: 'm' });
 
-  var ops = D.ops, T = V.tot, veh = T.car + T.truck, x0 = 556, y = 84;
-  ops.push({ t: 'text', x: 28, y: 36, s: title, size: 18, bold: true, color: '#0f172a' });
-  ops.push({ t: 'text', x: 28, y: 52, s: sub, size: 9.5, color: '#475569' });
-  var row = function (lab, val, bold) { ops.push({ t: 'text', x: x0, y: y, s: lab, size: 10.5, bold: bold, color: '#0f172a' }); ops.push({ t: 'text', x: 764, y: y, s: String(val), size: 10.5, bold: true, color: '#0f172a', anchor: 'r' }); y += 17; };
-  ops.push({ t: 'text', x: x0, y: y, s: isPeak ? 'Peak hour totals' : 'Full count totals', size: 12, bold: true, color: '#0f172a' }); y += 8;
-  ops.push({ t: 'line', x1: x0, y1: y, x2: 764, y2: y, stroke: '#cbd5e1', sw: 0.8 }); y += 15;
-  row('Vehicles (cars + trucks/buses)', veh, true); row('  Cars', T.car); row('  Trucks / buses', T.truck);
-  row('  Heavy vehicle share', veh ? (T.truck / veh * 100).toFixed(1) + '%' : '–');
-  if (isPeak && M.pk) row('Peak hour factor', M.pk.phf == null ? '–' : M.pk.phf.toFixed(3));
-  row('Bicycles', T.bike); row('Pedestrians', T.ped);
-  y += 10; ops.push({ t: 'text', x: x0, y: y, s: 'Vehicles entering, by approach', size: 12, bold: true, color: '#0f172a' }); y += 8;
-  ops.push({ t: 'line', x1: x0, y1: y, x2: 764, y2: y, stroke: '#cbd5e1', sw: 0.8 }); y += 15;
-  legs.forEach(function (L) {
-    var s = 0; Object.keys(V.m).forEach(function (k) { if (k.split('>')[0] === L.id) s += V.m[k].car + V.m[k].truck; });
-    ops.push({ t: 'text', x: x0, y: y, s: fitTxt(L.name + ' (' + dirOf(L.angle).n + ')', 10.5, false, 170), size: 10.5, color: '#0f172a' });
-    ops.push({ t: 'text', x: 764, y: y, s: String(s), size: 10.5, bold: true, color: '#0f172a', anchor: 'r' }); y += 16;
-  });
-  y += 8;
-  var legend = ['Boxes: cars + trucks/buses for each movement (arrow shows the turn).', 'Purple badge: bicycles making that movement.', panel ? 'Teal boxes: pedestrians crossing in the arrow direction.' : 'Teal circles: pedestrians crossing at that leg, walking toward that side.'];
-  var removed = S.legs.some(function (l) { return l.removed; });
-  if (removed) legend.push('Counts on removed legs are in the totals but not drawn.');
-  legend.forEach(function (s2) {
-    var words = s2.split(' '), line = '';
-    words.forEach(function (wd) { if (tw(line + ' ' + wd, 8.5, false) > 208) { ops.push({ t: 'text', x: x0, y: y, s: line, size: 8.5, color: '#64748b' }); y += 11; line = wd; } else line = line ? line + ' ' + wd : wd; });
-    ops.push({ t: 'text', x: x0, y: y, s: line, size: 8.5, color: '#64748b' }); y += 13;
-  });
+  // totals in the middle of the junction
+  var T = V.tot, veh = T.car + T.truck, cw0 = panel ? 250 : 210, ch0 = panel ? 176 : 190;
+  D.rect(500 - cw0 / 2, 500 - ch0 / 2, cw0, ch0, { fill: '#ffffff', stroke: '#0f172a', sw: 1, r: 14 });
+  var cl = function (dy, txt, size, o) { D.text(500, 500 + dy / sc, txt, size, o); };
+  var top0 = -ch0 / 2 * sc;
+  cl(top0 + 13, mode === 'peak' ? 'PEAK HOUR · ALL VEHICLES' : mode === 'nopeak' ? 'ALL COUNTED · ALL VEHICLES' : 'FULL COUNT · ALL VEHICLES', 6.5, { color: '#64748b', bold: true, anchor: 'm' });
+  cl(top0 + 34, String(veh), 20, { bold: true, color: '#0f172a', anchor: 'm' });
+  cl(top0 + 49, 'Heavy vehicles ' + T.truck + ' (' + (veh ? (T.truck / veh * 100).toFixed(1) : '0.0') + '%)', 8, { bold: true, color: '#c2410c', anchor: 'm' });
+  var yy = 62;
+  if (panel) cl(top0 + yy, 'Bicycles ' + T.bike + '  ·  Pedestrians ' + T.ped, 7.5, { color: '#0f172a', anchor: 'm' });
+  else { cl(top0 + yy, 'Bicycles ' + T.bike, 7.5, { color: '#0f172a', anchor: 'm' }); yy += 11; cl(top0 + yy, 'Pedestrians ' + T.ped, 7.5, { color: '#0f172a', anchor: 'm' }); }
+  if (mode === 'peak' && M.pk && M.pk.phf != null) cl(top0 + yy + 13, 'Peak hour factor ' + M.pk.phf.toFixed(3), 7.5, { color: '#0f172a', anchor: 'm' });
+
+  var ops = D.ops;
+  ops.push({ t: 'text', x: 28, y: 33, s: title, size: 18, bold: true, color: '#0f172a' });
+  lines.forEach(function (ln, i) { ops.push({ t: 'text', x: 28, y: 49 + i * 13, s: ln, size: 9.5, color: '#475569' }); });
+  var lg = 'Boxes: cars + heavy vehicles per movement (arrow shows the turn). Purple badge: bicycles making that movement. ' + (panel ? 'Teal boxes: pedestrians crossing in the arrow direction.' : 'Teal circles: pedestrians crossing at that leg, walking toward that side.');
+  if (S.legs.some(function (l) { return l.removed; })) lg += ' Counts on removed legs are in the totals but not drawn.';
+  ops.push({ t: 'text', x: PW / 2, y: 588, s: fitTxt(lg, 7, false, 736), size: 7, color: '#64748b', anchor: 'm' });
   return ops;
 }
 function volumesIn(M, i0, i1) {
@@ -1041,7 +1042,7 @@ function tablePages(M, title, cols, valFn, rowTot) {
   do {
     var chunk = all.slice(pi * perPage, (pi + 1) * perPage), ops = [], y = top;
     ops.push({ t: 'text', x: 28, y: 36, s: title + (pi ? ' (continued)' : ''), size: 18, bold: true, color: '#0f172a' });
-    ops.push({ t: 'text', x: 28, y: 52, s: (S.site || 'Untitled count') + ' · ' + ymd(S.startedAt) + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : ''), size: 9.5, color: '#475569' });
+    ops.push({ t: 'text', x: 28, y: 52, s: (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt) + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : ''), size: 9.5, color: '#475569' });
     // group headers
     var gx = left + firstW, k = 0;
     while (k < cols.length) {
@@ -1072,16 +1073,18 @@ function tablePages(M, title, cols, valFn, rowTot) {
 function buildPdfPages() {
   var M = exportModel(), pk = M.pk, pages = [], n = M.bins.length;
   var span = hhmm(M.bins[0].start) + '–' + hhmm(M.bins[n - 1].start + BIN);
-  var meta = (S.site || 'Untitled count') + ' · ' + ymd(S.startedAt) + (S.observer ? ' · ' + S.observer : '');
-  pages.push(diagramPage(M, 0, n - 1, 'Full count — all volumes', meta + ' · ' + span, false));
-  if (pk) pages.push(diagramPage(M, pk.i, pk.i + 3, 'Peak hour — ' + hhmm(pk.start) + '–' + hhmm(pk.end), meta + ' · peak hour by cars + trucks/buses (' + pk.vol + ' vehicles)', true));
+  var meta = (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : '');
+  var wx = S.weather ? 'Weather: ' + S.weather + ' · ' : '';
+  pages.push(diagramPage(M, 0, n - 1, 'Full count — all volumes', [meta, wx + 'Counted ' + span], 'full'));
+  if (pk) pages.push(diagramPage(M, pk.i, pk.i + 3, 'Peak hour — ' + hhmm(pk.start) + '–' + hhmm(pk.end), [meta, wx + 'Busiest four consecutive complete 15-minute intervals by cars + heavy vehicles (' + pk.vol + ' vehicles)'], 'peak'));
+  else pages.push(diagramPage(M, 0, n - 1, 'Peak hour — not available', [meta, 'A peak hour needs four complete 15-minute intervals in a row; only ' + M.A.nFull + ' complete interval' + (M.A.nFull === 1 ? ' was' : 's were') + ' counted.', 'Showing everything counted (' + span + ') instead.'], 'nopeak'));
   var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? o[cls] : 0; }; };
   var sumOf = function (v) { return v.reduce(function (s, x) { return s + x; }, 0); };
-  [['Cars', 'car'], ['Trucks / buses', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0] + ' by movement', M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
+  [['Cars', 'car'], ['Heavy vehicles', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0] + ' by movement', M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
   pages = pages.concat(tablePages(M, 'Pedestrians by crosswalk', M.pcols, cell('ped'), function (b, v) { return sumOf(v); }));
   pages.forEach(function (ops, i) {
-    ops.push({ t: 'text', x: 28, y: 596, s: meta, size: 8, color: '#94a3b8' });
-    ops.push({ t: 'text', x: 764, y: 596, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
+    ops.push({ t: 'text', x: 28, y: 603, s: meta, size: 8, color: '#94a3b8' });
+    ops.push({ t: 'text', x: 764, y: 603, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
   });
   return pages;
 }
