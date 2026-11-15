@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '11 (15 Nov 2026)';
+var APP_VERSION = '12 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -637,12 +637,13 @@ function saveOne(it) {   // plain download / open fallback
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   } catch (e) { toast('Could not save: ' + (e && e.message || e)); }
 }
-var NOSHARE_HINT = 'This iPad cannot open the share sheet for this file type from the app. Tap Open, then use the Share button in the viewer, or use the PDF / CSV files, which usually work.';
+var CAN_DL = (function () { try { return 'download' in document.createElement('a'); } catch (e) { return false; } })();
+var LEGACY_NOTE = 'This iPad’s software (iOS 12) cannot send files from a Home Screen app. Use Email or Share as text, or Copy and paste into Excel.';
 function canShareIt(it) {
   try {
     if (!navigator.share) return false;
     var file = new File([it.blob], it.name, { type: it.mime });
-    return navigator.canShare ? !!navigator.canShare({ files: [file] }) : true;
+    return navigator.canShare ? !!navigator.canShare({ files: [file] }) : false;
   } catch (e) { return false; }
 }
 function shareOne(it) {
@@ -650,32 +651,49 @@ function shareOne(it) {
   try { file = new File([it.blob], it.name, { type: it.mime }); } catch (e) {}
   if (file && canShareIt(it)) {
     try {
-      navigator.share({ files: [file], title: it.name }).catch(function (err) { if (err && err.name === 'AbortError') return; toast('Share sheet refused (' + (err && err.name || 'error') + ') — opening a viewer'); saveOne(it); });
+      navigator.share({ files: [file], title: it.name }).catch(function (err) { if (err && err.name === 'AbortError') return; toast('Share sheet refused (' + (err && err.name || 'error') + ')'); if (CAN_DL) saveOne(it); });
       return;
     } catch (e) {}
   }
-  toast('This iPad can not share this file type directly — use the Share button in the viewer');
-  saveOne(it);
+  if (CAN_DL) saveOne(it); else toast('This iPad can not send files from the app');
 }
 function shareText(it) {
   try { navigator.share({ title: it.name, text: it.text }).catch(function () {}); } catch (e) { toast('Sharing text is not available'); }
 }
-function offerFiles(items, copyText) {
+function mailText(it) {
+  location.href = 'mailto:?subject=' + encodeURIComponent(it.name) + '&body=' + encodeURIComponent(it.text);
+}
+function copyOut(txt) {
+  try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(txt).then(function () { toast('Copied — paste into Excel, Numbers or Notes'); }, function () { toast('Copy not allowed here'); }); return; } } catch (e) {}
+  var ok = false, ta = document.createElement('textarea');
+  ta.value = txt; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;-webkit-user-select:text;user-select:text';
+  document.body.appendChild(ta);
+  try {
+    var r = document.createRange(); r.selectNodeContents(ta); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    ta.setSelectionRange(0, 999999); ok = document.execCommand('copy');
+  } catch (e) {}
+  ta.parentNode.removeChild(ta);
+  toast(ok ? 'Copied — paste into Excel, Numbers or Notes' : 'Copy is not allowed on this iPad');
+}
+function tsv(rows) { return rows.map(function (r) { return r.map(function (c) { return c == null ? '' : String(c).replace(/[\t\r\n]+/g, ' '); }).join('\t'); }).join('\n'); }
+function offerFiles(items) {
   var rows = items.map(function (it, i) {
-    return '<div class="rrow"><div class="ri"><b>' + esc(it.name) + '</b><small>' + Math.max(1, Math.round(it.blob.size / 1024)) + ' KB</small></div>' +
-      '<button class="hb dark" data-a="share" data-i="' + i + '">Share / Save</button>' + (it.text && navigator.share ? '<button class="ghost" data-a="text" data-i="' + i + '">Share as text</button>' : '') + '<a class="ghost lnk" data-i="' + i + '" target="_blank">Open</a></div>' +
-      (canShareIt(it) ? '' : '<p class="hint" style="margin:0 0 6px">' + NOSHARE_HINT + '</p>');
+    var ok = canShareIt(it), btn = '';
+    if (ok) btn += '<button class="hb dark" data-a="share" data-i="' + i + '">Share / Save</button>' + (CAN_DL ? '<a class="ghost lnk" data-i="' + i + '" target="_blank">Open</a>' : '');
+    if (it.text) {
+      if (navigator.share) btn += '<button class="' + (ok ? 'ghost' : 'hb dark') + '" data-a="text" data-i="' + i + '">Share as text</button>';
+      btn += '<button class="ghost" data-a="mail" data-i="' + i + '">Email text</button><button class="ghost" data-a="copy" data-i="' + i + '">Copy</button>';
+    }
+    return '<div class="xrow"><div class="ri"><b>' + esc(it.name) + '</b><small>' + Math.max(1, Math.round(it.blob.size / 1024)) + ' KB</small></div><div class="xb">' + btn + '</div>' +
+      (ok ? '' : '<p class="hint" style="margin:6px 0 0">' + LEGACY_NOTE + '</p>') + '</div>';
   }).join('');
-  openSheet('Export', '<p class="hint">Tap a file to share it or save it to Files, email, AirDrop, etc.</p>' + rows + (copyText ? '<div class="row"><button class="ghost" data-a="copy">Copy summary as text</button></div>' : ''), function (box) {
+  openSheet('Export', rows, function (box) {
     var links = box.querySelectorAll('a.lnk');
     for (var i = 0; i < links.length; i++) { try { links[i].href = URL.createObjectURL(items[+links[i].dataset.i].blob); } catch (e) {} }
     box.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-a]'); if (!b) return;
-      if (b.dataset.a === 'share') shareOne(items[+b.dataset.i]);
-      else if (b.dataset.a === 'text') shareText(items[+b.dataset.i]);
-      else if (b.dataset.a === 'copy') {
-        try { navigator.clipboard.writeText(copyText).then(function () { toast('Copied'); }, function () { toast('Copy not allowed here'); }); } catch (e2) { toast('Copy not available'); }
-      }
+      var it = items[+b.dataset.i], a = b.dataset.a;
+      if (a === 'share') shareOne(it); else if (a === 'text') shareText(it); else if (a === 'mail') mailText(it); else if (a === 'copy') copyOut(it.tsv || it.text);
     });
   });
 }
@@ -786,8 +804,8 @@ function exportCSVs() {
   try {
     var sheets = buildSheets();
     offerFiles(sheets.map(function (sh) {
-      return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['\ufeff' + csv(sh.rows)], { type: 'text/csv' }), text: csv(sh.rows) };
-    }), csv(sheets[0].rows));
+      return { name: fileBase() + '_' + sh.file + '.csv', mime: 'text/csv', blob: new Blob(['\ufeff' + csv(sh.rows)], { type: 'text/csv' }), text: csv(sh.rows), tsv: tsv(sh.rows) };
+    }));
   } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
 }
 
@@ -843,7 +861,7 @@ function xlsxBlob(sheets) {
 function exportExcel() {
   try {
     var sheets = buildSheets();
-    offerFiles([{ name: fileBase() + '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', blob: xlsxBlob(sheets) }], csv(sheets[0].rows));
+    offerFiles([{ name: fileBase() + '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', blob: xlsxBlob(sheets), text: sheets.map(function (sh) { return csv(sh.rows); }).join('\r\n\r\n'), tsv: sheets.map(function (sh) { return tsv(sh.rows); }).join('\n\n') }]);
   } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
 }
 
@@ -1071,7 +1089,7 @@ function buildPdfPages() {
 /* ops -> SVG (preview) */
 function pagesSVG(ops) {
   var f2 = function (v) { return Math.round(v * 100) / 100; };
-  var o = '<svg viewBox="0 0 ' + PW + ' ' + PH + '" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif"><rect width="' + PW + '" height="' + PH + '" fill="#fff"/>';
+  var o = '<svg width="' + PW + '" height="' + PH + '" viewBox="0 0 ' + PW + ' ' + PH + '" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif"><rect width="' + PW + '" height="' + PH + '" fill="#fff"/>';
   ops.forEach(function (p) {
     if (p.t === 'rect') o += '<rect x="' + f2(p.x) + '" y="' + f2(p.y) + '" width="' + f2(p.w) + '" height="' + f2(p.h) + '"' + (p.r ? ' rx="' + f2(p.r) + '"' : '') + ' fill="' + (p.fill || 'none') + '"' + (p.stroke ? ' stroke="' + p.stroke + '" stroke-width="' + (p.sw || 1) + '"' : '') + '/>';
     else if (p.t === 'line') o += '<line x1="' + f2(p.x1) + '" y1="' + f2(p.y1) + '" x2="' + f2(p.x2) + '" y2="' + f2(p.y2) + '" stroke="' + p.stroke + '" stroke-width="' + (p.sw || 1) + '"' + (p.dash ? ' stroke-dasharray="' + p.dash.join(' ') + '"' : '') + '/>';
@@ -1145,17 +1163,28 @@ function pdfBlob(pages) {
   return new Blob([bytes], { type: 'application/pdf' });
 }
 
+function svgToPng(svgStr, cb) {
+  var img = new Image();
+  img.onload = function () {
+    try { var c = document.createElement('canvas'); c.width = PW * 2; c.height = PH * 2; var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height); cb(c.toDataURL('image/png')); } catch (e) { cb(null); }
+  };
+  img.onerror = function () { cb(null); };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+}
 function openPdfPreview() {
-  var pages, blob;
-  try { pages = buildPdfPages(); blob = pdfBlob(pages); } catch (e) { toast('Could not build the PDF: ' + (e && e.message || e)); return; }
+  var pages, blob, svgs;
+  try { pages = buildPdfPages(); blob = pdfBlob(pages); svgs = pages.map(pagesSVG); } catch (e) { toast('Could not build the PDF: ' + (e && e.message || e)); return; }
   var it = { name: fileBase() + '_summary.pdf', mime: 'application/pdf', blob: blob };
   var can = canShareIt(it);
-  openSheet('Summary PDF preview', '<div class="row"><button class="hb dark" data-a="share">Share / Save PDF</button><a class="ghost lnk" target="_blank">Open</a></div>' +
-    (can ? '' : '<p class="hint">' + NOSHARE_HINT + '</p>') +
-    pages.map(function (ops, i) { return '<div class="pdfpg">' + pagesSVG(ops) + '</div>'; }).join(''), function (box, sheet) {
+  var top = can ? '<div class="row"><button class="hb dark" data-a="share">Share / Save PDF</button>' + (CAN_DL ? '<a class="ghost lnk" target="_blank">Open</a>' : '') + '</div>'
+    : '<p class="hint"><b>Saving the pages:</b> this iPad (iOS 12) cannot send PDF files from a Home Screen app. Touch and hold a page below, then tap <b>Save Image</b> (to Photos) or <b>Share</b> to email or AirDrop it. The Excel / CSV export has the same numbers as tables.</p>';
+  openSheet('Summary PDF preview', top + svgs.map(function (sv, i) { return '<div class="pdfpg" data-pg="' + i + '">' + sv + '</div>'; }).join(''), function (box, sheet) {
     var sh = $('.sheet', sheet); if (sh) sh.classList.add('wide');
-    var a = box.querySelector('a.lnk'); try { a.href = URL.createObjectURL(blob); } catch (e) {}
+    var a = box.querySelector('a.lnk'); if (a) { try { a.href = URL.createObjectURL(blob); } catch (e) {} }
     box.addEventListener('click', function (e) { var b = e.target.closest('button[data-a]'); if (b) shareOne(it); });
+    if (!can) svgs.forEach(function (sv, i) {   // pictures can be touched-and-held to save or share
+      svgToPng(sv, function (url) { var d = box.querySelector('.pdfpg[data-pg="' + i + '"]'); if (url && d) d.innerHTML = '<img alt="Page ' + (i + 1) + '" src="' + url + '">'; });
+    });
   });
 }
 

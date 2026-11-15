@@ -24,6 +24,10 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - **Summary PDF:** the *Summary PDF* button on the results screen shows a preview, then *Share / Save PDF*. Pages: full-count diagram with every volume, peak-hour diagram, then tables for cars, trucks/buses, bicycles and pedestrians (peak hour shaded). Built in the app, works offline.
 - **Export:** tap an export button and a panel lists the file(s); tap *Share / Save* on each (or *Open*). One Excel file with three sheets, or the same three sheets as separate CSV files. Rows are 15-minute intervals; columns are grouped by leg as Left, Thru, Right (plus U-turn if any were counted). *Summary*: cars + trucks/buses per movement, total vehicles, bicycles, pedestrians, peak-hour flag, totals, peak-hour row, PHF, legs and notes. *Vehicles*: cars and trucks/buses as separate tables. *Bikes and Peds*: bicycles by movement, pedestrians by crosswalk and walking direction.
 
+## Older iPads (iOS 12 and similar)
+- Web browsers on iOS 12 cannot send files (Excel, PDF, CSV) from a Home Screen app. On these iPads the export panel offers *Share as text*, *Email text* and *Copy* (paste into Excel or Numbers; columns split into cells), and the PDF preview shows each page as a picture: touch and hold it, then *Save Image* or *Share*.
+- On iOS 15 and newer, *Share / Save* opens the normal share sheet (email, AirDrop, Save to Files) for PDF and CSV files.
+
 ## Notes
 - Data is stored in the browser's local storage on each iPad. Export the CSVs after each count.
 - Stop on a 15-minute mark for a clean last interval; partial first/last intervals are flagged in the results.
