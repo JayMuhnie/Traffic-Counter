@@ -28,7 +28,10 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - Stop on a 15-minute mark for a clean last interval; partial first/last intervals are flagged in the results.
 - Right-hand traffic is assumed when placing the approach buttons.
 
-## If an iPad shows an old version
+## Updates
+- The app checks for a newer version whenever it is opened or brought back to the front (and every 5 minutes) while online. On the setup or results screen it installs itself; during a count a green "Update available" button appears instead, and you tap it when convenient. Counts are kept. Setup screen: "Check for updates" button.
+
+## If an iPad shows an old version (only needed once, to get a version older than 10 onto the new updater)
 - The setup screen shows the app version at the bottom. Compare it with the version you deployed.
 - Export any counts you want to keep first, then: Settings -> Safari -> Advanced -> Website Data -> delete the site (this erases the counts saved on that iPad). Remove the Home Screen icon, reopen the link in Safari, and add it to the Home Screen again.
 - From version 4 on, a new version installs itself the next time the app is opened online (it will not reload in the middle of a count).

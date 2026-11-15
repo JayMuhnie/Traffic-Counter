@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '9 (15 Nov 2026)';
+var APP_VERSION = '10 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -278,7 +278,7 @@ function renderSetup() {
     '<div class="card"><label class="chk"><input type="checkbox" id="align"' + (alignStart ? ' checked' : '') + '> Start at the next 15-minute mark</label><div class="hint" id="alignhint"></div></div>' +
     '<button class="big go" id="start">Start count</button>' +
     '<div class="row"><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div>' +
-    '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export the CSV files after each count.<br>To install: Safari → Share → Add to Home Screen.<br>App version ' + APP_VERSION + '</p></div>';
+    '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export the CSV files after each count.<br>To install: Safari → Share → Add to Home Screen.<br>App version ' + APP_VERSION + ' <button class="ghost" id="chkupd" style="min-height:36px;padding:4px 10px;margin-left:8px">Check for updates</button></p></div>';
   legEditor($('#legs'));
   $('#site').addEventListener('input', function (e) { S.site = e.target.value; persist(); });
   $('#obs').addEventListener('input', function (e) { S.observer = e.target.value; persist(); });
@@ -899,8 +899,37 @@ app.addEventListener('click', function (e) {
     case 'exp2': exportCSVs(); break;
     case 'newcount': if (confirm('Start a new count? This one is saved under Past counts.')) startNew(); break;
     case 'hist': openHistory(); break;
+    case 'chkupd': toast('Checking…'); checkUpdate(true); break;
   }
 });
+
+/* ---------- self-update: no need to delete the app and re-add it ---------- */
+var updShown = false;
+function applyUpdate() {   // your counts live in local storage and are not touched
+  var go = function () { location.reload(); };
+  try { if (window.caches) caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }).then(go, go); else go(); } catch (e) { go(); }
+}
+function checkUpdate(manual) {
+  if (navigator.onLine === false) { if (manual) toast('No internet — try again when online'); return; }
+  fetch('app.js', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+    var m = /APP_VERSION = '([^']+)'/.exec(t);
+    if (!m) { if (manual) toast('Could not check right now'); return; }
+    if (m[1] === APP_VERSION) { if (manual) toast('You have the latest version (' + APP_VERSION + ')'); return; }
+    var tried = ''; try { tried = sessionStorage.getItem('tmc.upd') || ''; } catch (e) {}
+    if (view !== 'count' && !$('#sheet') && tried !== m[1]) { try { sessionStorage.setItem('tmc.upd', m[1]); } catch (e) {} applyUpdate(); return; }
+    if (updShown) return;
+    updShown = true;
+    var b = document.createElement('button');
+    b.textContent = 'Update available (version ' + m[1].split(' ')[0] + ') — tap to install';
+    b.style.cssText = 'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;background:#16a34a;color:#fff;border:0;border-radius:999px;padding:12px 20px;font:700 15px -apple-system,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.35)';
+    b.onclick = function () { try { sessionStorage.removeItem('tmc.upd'); } catch (e) {} applyUpdate(); };
+    document.body.appendChild(b);
+  }).catch(function () { if (manual) toast('Could not check right now'); });
+}
+document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdate(); });
+window.addEventListener('online', function () { checkUpdate(); });
+setInterval(checkUpdate, 5 * 60000);
+setTimeout(checkUpdate, 2500);
 
 render();
 if ('serviceWorker' in navigator) {
