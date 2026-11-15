@@ -40,3 +40,9 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - The setup screen shows the app version at the bottom. Compare it with the version you deployed.
 - Export any counts you want to keep first, then: Settings -> Safari -> Advanced -> Website Data -> delete the site (this erases the counts saved on that iPad). Remove the Home Screen icon, reopen the link in Safari, and add it to the Home Screen again.
 - From version 4 on, a new version installs itself the next time the app is opened online (it will not reload in the middle of a count).
+
+## v15
+- PDF diagram: arrows and numbers are fitted inside each movement card for 1–3 digit counts.
+- Intersection name is the header on every PDF page.
+- Short counts: centre label reads "PEAK HOUR" (with a "less than a full hour" note).
+- Sound: count taps now play short audio clips (they sound even with the side mute switch on) with a Web Audio fallback. Check the 🔊 toggle and volume.

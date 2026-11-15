@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '14 (15 Nov 2026)';
+var APP_VERSION = '15 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -94,17 +94,61 @@ function beep(freq, dur, type, vol, delay) {
   } catch (e) {}
 }
 // Each class has its own sound so a wrong-class tap can be caught by ear.
-function sound(kind) {
-  if (!soundOn) return;
-  switch (kind) {
-    case 'car': beep(740, 0.08); break;
-    case 'truck': beep(420, 0.16, 'triangle', 0.4); break;
-    case 'bus': beep(420, 0.07, 'triangle', 0.4); beep(420, 0.07, 'triangle', 0.4, 0.11); break;
-    case 'bike': beep(1180, 0.06); break;
-    case 'ped': beep(900, 0.05); beep(1250, 0.05, 'sine', 0.3, 0.07); break;
-    case 'undo': beep(520, 0.07, 'sawtooth', 0.15); beep(300, 0.12, 'sawtooth', 0.15, 0.08); break;
-  }
+// [frequency Hz, seconds, wave, volume, start delay] per note.
+var SOUNDS = {
+  car: [[740, 0.08, 'sine', 0.3, 0]],
+  truck: [[420, 0.16, 'triangle', 0.4, 0]],
+  bus: [[420, 0.07, 'triangle', 0.4, 0], [420, 0.07, 'triangle', 0.4, 0.11]],
+  bike: [[1180, 0.06, 'sine', 0.3, 0]],
+  ped: [[900, 0.05, 'sine', 0.3, 0], [1250, 0.05, 'sine', 0.3, 0.07]],
+  undo: [[520, 0.07, 'sawtooth', 0.15, 0], [300, 0.12, 'sawtooth', 0.15, 0.08]]
+};
+// Primary path: real audio clips (an <audio> element keeps playing when the iPad's side switch is set to mute, and works on old iOS).
+// Backup path: Web Audio oscillators.
+var clips = {};
+function makeClip(notes) {
+  var rate = 22050, end = 0, i, j;
+  notes.forEach(function (n) { end = Math.max(end, n[4] + n[1]); });
+  var len = Math.ceil((end + 0.04) * rate), pcm = new Int16Array(len);
+  notes.forEach(function (n) {
+    var f = n[0], dur = n[1], type = n[2], vol = n[3] * 1.6, st = Math.floor(n[4] * rate), cnt = Math.floor(dur * rate);
+    for (j = 0; j < cnt && st + j < len; j++) {
+      var t = j / rate, ph = (t * f) % 1, w = type === 'triangle' ? 4 * Math.abs(ph - 0.5) - 1 : type === 'sawtooth' ? 2 * ph - 1 : Math.sin(2 * Math.PI * ph);
+      var env = Math.min(1, t / 0.006) * Math.pow(1 - j / cnt, 1.4);
+      var v = pcm[st + j] + Math.round(w * env * vol * 32767 * 0.6);
+      pcm[st + j] = Math.max(-32767, Math.min(32767, v));
+    }
+  });
+  var bytes = new Uint8Array(44 + len * 2), dv = new DataView(bytes.buffer);
+  var wr = function (o, s2) { for (var q = 0; q < s2.length; q++) bytes[o + q] = s2.charCodeAt(q); };
+  wr(0, 'RIFF'); dv.setUint32(4, 36 + len * 2, true); wr(8, 'WAVEfmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); wr(36, 'data'); dv.setUint32(40, len * 2, true);
+  for (i = 0; i < len; i++) dv.setInt16(44 + i * 2, pcm[i], true);
+  var bin = ''; for (i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
+  var el = new Audio('data:audio/wav;base64,' + btoa(bin)); el.preload = 'auto'; try { el.load(); } catch (e) {}
+  return el;
 }
+function playClip(kind) {
+  try {
+    if (!window.Audio) return false;
+    var el = clips[kind] || (clips[kind] = makeClip(SOUNDS[kind]));
+    try { el.pause(); el.currentTime = 0; } catch (e) {}
+    var p = el.play();
+    if (p && p.catch) p.catch(function () { playBeeps(kind); });
+    return true;
+  } catch (e) { return false; }
+}
+function playBeeps(kind) { (SOUNDS[kind] || []).forEach(function (n) { beep(n[0], n[1], n[2], n[3], n[4]); }); }
+function sound(kind) {
+  if (!soundOn || !SOUNDS[kind]) return;
+  if (!playClip(kind)) playBeeps(kind);
+}
+// iOS only lets sound start from a touch: prepare the clips on the very first touch of the app
+function unlockSound() {
+  document.removeEventListener('touchend', unlockSound, true); document.removeEventListener('click', unlockSound, true);
+  try { audio(); Object.keys(SOUNDS).forEach(function (k) { if (!clips[k]) clips[k] = makeClip(SOUNDS[k]); }); } catch (e) {}
+}
+document.addEventListener('touchend', unlockSound, true); document.addEventListener('click', unlockSound, true);
 
 /* keep the screen awake while counting */
 var wl = null;
@@ -903,6 +947,11 @@ function drawArrow(D, ac, hd, dt, len, col, u, hs) {
   D.poly([[h0.x, h0.y], [h1.x, h1.y], [h2.x, h2.y]], { fill: col });
 }
 function numFmt(n) { return String(n); }
+function pageHeader(ops, title, lines) {
+  ops.push({ t: 'text', x: 28, y: 27, s: fitTxt(S.site || 'Untitled count', 15, true, 736), size: 15, bold: true, color: '#0f172a' });
+  ops.push({ t: 'text', x: 28, y: 43, s: title, size: 12.5, bold: true, color: '#1d4ed8' });
+  lines.forEach(function (ln, i) { ops.push({ t: 'text', x: 28, y: 56 + i * 11, s: fitTxt(ln, 8.5, false, 736), size: 8.5, color: '#475569' }); });
+}
 
 /* ---- icons and the summary diagram (independent of the counting screen) ---- */
 function ring(D, x, y, r, col, sw) { var p = []; for (var i = 0; i < 14; i++) p.push([x + r * Math.cos(i * Math.PI / 7), y + r * Math.sin(i * Math.PI / 7)]); D.poly(p, { stroke: col, sw: sw || 0.9 }); }
@@ -973,14 +1022,15 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
   legs.forEach(function (L) { var d = uv(L.angle), s = pt({ x: 500, y: 500 }, d, rw + 18), e = pt({ x: 500, y: 500 }, d, 480); D.line(s.x, s.y, e.x, e.y, { stroke: '#fbbf24', sw: 1, dash: [5, 4] }); });
 
   // one movement: arrow, vehicles, % heavy, bicycles
+  var fitN = function (str, size, maxw) { return Math.min(size, maxw / Math.max(0.1, tw(String(str), 1, true))); };
   var card = function (c, w, h, hd, dt, mv, u) {
-    var vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0;
+    var vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0, ay = -h * sc / 2 + 11.5, nf = fitN(vv, 11.5, 21), bf = fitN(bk, 8, 15);
     D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 8 });
-    drawArrow(D, { x: c.x - 13 * k, y: c.y - 15 * k }, hd, dt, 5 * k, '#1e3a8a', u, 0.75);
-    D.text(c.x + 11 * k, c.y - 11 * k, String(vv), 11.5, { bold: true, color: '#0f172a', anchor: 'm' });
-    D.text(c.x, c.y + 3.6 * k, pctHeavy(mv), 6.6, { color: vv ? '#c2410c' : '#94a3b8', anchor: 'm' });
-    iconBike(D, c.x - 11 * k, c.y + 14.5 * k, 11 * k, bk ? '#6d28d9' : '#a8a29e');
-    D.text(c.x + 6 * k, c.y + 17.3 * k, String(bk), 8, { bold: true, color: bk ? '#6d28d9' : '#a8a29e', anchor: 'm' });
+    drawArrow(D, { x: c.x - 13 * k, y: c.y + ay * k }, hd, dt, 4.2 * k, '#1e3a8a', u, 0.7);
+    D.text(c.x + 11.5 * k, c.y + (ay + nf * 0.36) * k, String(vv), nf, { bold: true, color: '#0f172a', anchor: 'm' });
+    D.text(c.x, c.y + (ay + 17.2) * k, pctHeavy(mv), 6.6, { color: vv ? '#c2410c' : '#94a3b8', anchor: 'm' });
+    iconBike(D, c.x - 11 * k, c.y + (ay + 28.5) * k, 11 * k, bk ? '#6d28d9' : '#a8a29e');
+    D.text(c.x + 6 * k, c.y + (ay + 28.5 + bf * 0.36) * k, String(bk), bf, { bold: true, color: bk ? '#6d28d9' : '#a8a29e', anchor: 'm' });
   };
   var pedBox = function (c, vert, dt, np) {
     var w = vert ? 66 : 150, h = vert ? 150 : 66;
@@ -988,7 +1038,8 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
     var o1 = vert ? { x: 0, y: -26 * k } : { x: -26 * k, y: 0 }, o2 = vert ? { x: 0, y: -4 * k } : { x: -4 * k, y: 0 }, o3 = vert ? { x: 0, y: 24 * k } : { x: 22 * k, y: 0 };
     iconPed(D, c.x + o1.x, c.y + o1.y, 12 * k, '#115e59');
     drawArrow(D, { x: c.x + o2.x, y: c.y + o2.y }, dt, dt, 6 * k, '#115e59', false, 0.8);
-    D.text(c.x + o3.x, c.y + o3.y + (vert ? 0 : 4 * k), String(np), 11, { bold: true, color: '#0f172a', anchor: 'm' });
+    var pf = fitN(np, 11, vert ? 26 : 24);
+    D.text(c.x + o3.x, c.y + o3.y + (vert ? 0 : pf * 0.36 * k), String(np), pf, { bold: true, color: '#0f172a', anchor: 'm' });
   };
   var entering = function (L) { var s = 0; Object.keys(V.m).forEach(function (kk) { if (kk.split('>')[0] === L.id) s += V.m[kk].car + V.m[kk].truck; }); return s; };
 
@@ -1004,7 +1055,7 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
         var tn = turnOf(L.angle, Dl.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0;
         card(at(292, lam, right), 100, 100, hd, uv(Dl.angle), V.m[L.id + '>' + Dl.id], false);
       });
-      card(at(395, -96, right), 104, 84, hd, hd, V.m[L.id + '>' + L.id], true);
+      card(at(395, -96, right), 104, 100, hd, hd, V.m[L.id + '>' + L.id], true);
       // street name and approach total, in the grass beside the end of the road
       var l1 = fitTxt(L.name, 8.5, true, 150), l2 = 'Approach total: ' + ent;
       var w = (Math.max(tw(l1, 8.5, true), tw(l2, 8, true)) + 14) / (sc), h = 27 / sc, sd = { x: -d.y, y: d.x };
@@ -1030,7 +1081,7 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
         var mv = V.m[L.id + '>' + x.leg.id], vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0, yc = 26 + j * rh + 6;
         drawArrow(D, { x: X(9), y: Y(yc) }, hd, uv(x.leg.angle), 3.6 * k, '#1e3a8a', x.u, 0.6);
         D.text(X(18), Y(yc + 2.6), x.u ? 'U-turn' : cap(turnLabel(x.turn).toLowerCase()), 7, { color: '#334155' });
-        D.text(X(70), Y(yc + 3), String(vv), 8.5, { bold: true, color: '#0f172a', anchor: 'r' });
+        D.text(X(70), Y(yc + 3), String(vv), fitN(vv, 8.5, 24), { bold: true, color: '#0f172a', anchor: 'r' });
         D.text(X(73), Y(yc + 2.6), pctHeavy(mv), 5.9, { color: vv ? '#c2410c' : '#94a3b8' });
         iconBike(D, X(118), Y(yc), 8 * k, bk ? '#6d28d9' : '#a8a29e');
         D.text(X(123.5), Y(yc + 2.6), String(bk), 7, { bold: true, color: bk ? '#6d28d9' : '#a8a29e' });
@@ -1047,14 +1098,14 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
   var span = hhmm(M.bins[i0].start) + '–' + hhmm(M.bins[i1].start + BIN), cw0 = panel ? 250 : 230, ch0 = panel ? 140 : 150, top0 = -ch0 / 2 * sc;
   D.rect(500 - cw0 / 2, 500 - ch0 / 2, cw0, ch0, { fill: '#ffffff', stroke: '#0f172a', sw: 1, r: 12 });
   var cl = function (dy, txt, size, o) { D.text(500, 500 + dy * k, txt, size, o); };
-  cl(top0 + 16, mode === 'peak' ? 'PEAK HOUR' : mode === 'nopeak' ? 'ALL COUNTED' : 'FULL COUNT', 8, { color: '#64748b', bold: true, anchor: 'm' });
+  cl(top0 + 16, mode === 'full' ? 'FULL COUNT' : 'PEAK HOUR', 8, { color: '#64748b', bold: true, anchor: 'm' });
   cl(top0 + 38, span, Math.min(19, (cw0 * sc - 14) / tw(span, 1, true)), { bold: true, color: '#0f172a', anchor: 'm' });
   cl(top0 + 52, dayName(S.startedAt) + ' ' + ymd(S.startedAt), 7.5, { color: '#334155', anchor: 'm' });
   if (mode === 'peak' && M.pk && M.pk.phf != null) cl(top0 + 64, 'Peak hour factor ' + M.pk.phf.toFixed(3), 7.5, { color: '#334155', anchor: 'm' });
+  if (mode === 'nopeak') cl(top0 + 64, 'Less than a full hour counted', 7, { color: '#c2410c', bold: true, anchor: 'm' });
 
   var ops = D.ops;
-  ops.push({ t: 'text', x: 28, y: 33, s: title, size: 18, bold: true, color: '#0f172a' });
-  lines.forEach(function (ln, i) { ops.push({ t: 'text', x: 28, y: 49 + i * 13, s: ln, size: 9.5, color: '#475569' }); });
+  pageHeader(ops, title, lines);
   legendOps(28, 98, 128).forEach(function (p) { ops.push(p); });
   if (S.legs.some(function (l) { return l.removed; })) ops.push({ t: 'text', x: PW - 28, y: 588, s: 'Movements on removed legs are not drawn.', size: 7, color: '#64748b', anchor: 'r' });
   return ops;
@@ -1088,8 +1139,7 @@ function tablePages(M, title, cols, valFn, rowTot) {
   var pages = [], pi = 0;
   do {
     var chunk = all.slice(pi * perPage, (pi + 1) * perPage), ops = [], y = top;
-    ops.push({ t: 'text', x: 28, y: 36, s: title + (pi ? ' (continued)' : ''), size: 18, bold: true, color: '#0f172a' });
-    ops.push({ t: 'text', x: 28, y: 52, s: (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt) + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : ''), size: 9.5, color: '#475569' });
+    pageHeader(ops, title + (pi ? ' (continued)' : ''), [ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : '') + (S.weather ? ' · ' + S.weather : '') + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : '')]);
     // group headers
     var gx = left + firstW, k = 0;
     while (k < cols.length) {
@@ -1120,7 +1170,7 @@ function tablePages(M, title, cols, valFn, rowTot) {
 function buildPdfPages() {
   var M = exportModel(), pk = M.pk, pages = [], n = M.bins.length;
   var span = hhmm(M.bins[0].start) + '–' + hhmm(M.bins[n - 1].start + BIN);
-  var meta = (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : '');
+  var meta = ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : ''), foot = (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : '');
   var wx = S.weather ? 'Weather: ' + S.weather + ' · ' : '';
   pages.push(diagramPage(M, 0, n - 1, 'Full count — all volumes', [meta, wx + 'Counted ' + span], 'full'));
   if (pk) pages.push(diagramPage(M, pk.i, pk.i + 3, 'Peak hour — ' + hhmm(pk.start) + '–' + hhmm(pk.end), [meta, wx + 'Busiest four consecutive complete 15-minute intervals by cars + heavy vehicles (' + pk.vol + ' vehicles)'], 'peak'));
@@ -1130,7 +1180,7 @@ function buildPdfPages() {
   [['Cars', 'car'], ['Heavy vehicles', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0] + ' by movement', M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
   pages = pages.concat(tablePages(M, 'Pedestrians by crosswalk', M.pcols, cell('ped'), function (b, v) { return sumOf(v); }));
   pages.forEach(function (ops, i) {
-    ops.push({ t: 'text', x: 28, y: 603, s: meta, size: 8, color: '#94a3b8' });
+    ops.push({ t: 'text', x: 28, y: 603, s: foot, size: 8, color: '#94a3b8' });
     ops.push({ t: 'text', x: 764, y: 603, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
   });
   return pages;
