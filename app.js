@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '31 (16 Nov 2026)';
+var APP_VERSION = '32 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
@@ -411,22 +411,22 @@ function countSVG(legs, md) {
 
 /* lane layout: each leg shows crosswalk buttons, then Right | Thru | Left across the road as the driver sees it from above, then U-turn */
 function panelSVG(legs) {
-  var o = roadsInner(legs, false, 160), n = legs.length;
+  var o = roadsInner(legs, false, 182), n = legs.length;
   legs.forEach(function (L, i) {
     var d = uv(L.angle), right = { x: d.y, y: -d.x }, hd = { x: -d.x, y: -d.y };
     var th = L.angle * Math.PI / 180, t = { x: Math.cos(th), y: Math.sin(th) }, vert = Math.abs(d.x) > 0.5;   // t = clockwise walking direction; vert = east/west leg
     var at = function (r, lam, vec) { return { x: 500 + d.x * r + vec.x * lam, y: 500 + d.y * r + vec.y * lam }; };
     [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]].forEach(function (pr) {   // crosswalk: one button per walking direction
-      var dt = { x: t.x * pr[1], y: t.y * pr[1] }, p = at(202, pr[1] * 78, t);
-      o += flatG('p', L.id, pr[0].id, arrowIcon(dt, dt), p.x, p.y, vert ? 66 : 150, vert ? 150 : 66, ' pd', vert);
+      var dt = { x: t.x * pr[1], y: t.y * pr[1] }, p = at(204, pr[1] * 84, t);
+      o += flatG('p', L.id, pr[0].id, arrowIcon(dt, dt), p.x, p.y, vert ? 74 : 164, vert ? 164 : 74, ' pd', vert);
     });
     legs.forEach(function (D) {
       if (D.id === L.id) return;
-      var tn = turnOf(L.angle, D.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0, p = at(287, lam, right);   // + lam = driver's right
-      o += mvG('v', L.id, D.id, turnLabel(tn), arrowIcon(hd, uv(D.angle)), p.x, p.y, 1.06, '');
+      var tn = turnOf(L.angle, D.angle), lam = tn < 0 ? -118 : tn > 0 ? 118 : 0, p = at(294, lam, right);   // + lam = driver's right
+      o += mvG('v', L.id, D.id, turnLabel(tn), arrowIcon(hd, uv(D.angle)), p.x, p.y, 1.2, '');
     });
-    var pu = at(287 + 100, -104, right);   // same size as the turn buttons, in line with the left-turn column
-    o += mvG('v', L.id, L.id, 'U-TURN', uIcon(hd), pu.x, pu.y, 1.06, ' u');
+    var pu = at(294 + 112, -118, right);   // same size as the turn buttons, in line with the left-turn column
+    o += mvG('v', L.id, L.id, 'U-TURN', uIcon(hd), pu.x, pu.y, 1.2, ' u');
   });
   return svgWrap(o + COMPASS);
 }

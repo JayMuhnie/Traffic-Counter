@@ -107,3 +107,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v31
 - Fix: v29/v30 pedestrian label change accidentally overrode vehicle/bike movement labels (missing braces). Vehicles/bikes show SBR etc. again; pedestrians show "North leg · EB".
+
+## v32
+- Count screen (4-leg layout): turn buttons ~13% larger, crosswalk buttons ~12% larger, wider road to fit.
