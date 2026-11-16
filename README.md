@@ -122,3 +122,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v36
 - Heavy vehicles now also show as a small orange bubble (bottom-left of each movement button), like bikes (top-right). The big number on each button is now cars only.
+
+## v37
+- Heavy (orange, left) and bike (purple, right) bubbles now sit beside the arrow icon instead of on the button corners.

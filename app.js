@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '36 (16 Nov 2026)';
+var APP_VERSION = '37 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
@@ -358,9 +358,9 @@ function uIcon(h) {
   return '<g transform="translate(0 -2) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
 }
 function badgeG(k, from, to, cx, cy) {   // small purple bubble: bicycles that made this movement in the current interval
-  if (k !== 'v') return '';   // top-right purple bubble = bicycles, bottom-left orange bubble = heavy vehicles (the big number is cars only)
-  var one = function (cls, key, x, y) { return '<g class="bk ' + cls + '" data-bk="' + key + '|' + from + '|' + to + '" visibility="hidden"><circle cx="' + x + '" cy="' + y + '" r="14"/><text x="' + x + '" y="' + (y + 6) + '">0</text></g>'; };
-  return one('b', 'b', cx, cy) + one('h', 'h', -cx, -cy);
+  if (k !== 'v') return '';   // right purple bubble = bicycles, left orange bubble = heavy vehicles (the big number is cars only)
+  var one = function (cls, key, x, y) { return '<g class="bk ' + cls + '" data-bk="' + key + '|' + from + '|' + to + '" visibility="hidden"><circle cx="' + x + '" cy="' + y + '" r="12.5"/><text x="' + x + '" y="' + (y + 5.5) + '">0</text></g>'; };
+  return one('b', 'b', cx, cy) + one('h', 'h', -cx, cy);
 }
 function mvG(k, from, to, label, icon, x, y, f, extra) {
   return '<g class="mv' + (extra || '') + '" data-k="' + k + '" data-from="' + from + '" data-to="' + to + '" transform="translate(' + f1(x) + ' ' + f1(y) + ') scale(' + (Math.round(f * 1000) / 1000) + ')">' +
@@ -368,7 +368,7 @@ function mvG(k, from, to, label, icon, x, y, f, extra) {
     '<rect class="flash" x="-44" y="-44" width="88" height="88" rx="16"/>' +
     '<rect class="rg0" x="-46" y="-46" width="92" height="92" rx="18"/><rect class="rg1" x="-46" y="-46" width="92" height="92" rx="18"/>' +
     '<text class="lb" x="0" y="-27"' + (label.length > 7 ? ' style="font-size:' + Math.max(9, Math.floor(115 / label.length)) + 'px"' : '') + '>' + esc(label) + '</text>' + icon +
-    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text>' + badgeG(k, from, to, 35, -35) + '</g>';
+    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text>' + badgeG(k, from, to, 29, 0) + '</g>';
 }
 function flatG(k, from, to, icon, x, y, w, h, extra, vert) {   // flat button: icon then count (side by side, or stacked when vert)
   var hw = w / 2, hh = h / 2;
