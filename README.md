@@ -95,3 +95,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - Setup screen → **Test Tools**: (1) Self-test runs ~33 checks on the device's own JS engine against answer keys computed separately in Python; (2) Demo count loads a finished 183-tap count with an expected-vs-app check table; (3) Time-jump count lets you tap a short recipe on the real count screen, with a **+15** button that jumps the clock to the next interval.
 - Test counts are flagged (`S.test`), use a shifted clock `NOW()`, and are never saved to Past counts.
 - Added `selftest.js` (cached by the service worker, `tmc-v27`).
+
+## v28
+- Recent / Undo / toast text now describes vehicle and bike movements by direction of travel and turn: SBR, NBL, EBT, WBU, etc. (BL/BR/SL/SR for bear/sharp turns on non-90° legs). Pedestrians unchanged.

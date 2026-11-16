@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '27 (16 Nov 2026)';
+var APP_VERSION = '28 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
@@ -514,7 +514,12 @@ function kindLabel(e) { return e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Heavy veh
 function chipCls(e) { return e.k === 'v' ? (e.c === 'car' ? 'car' : 'truck') : e.k === 'b' ? 'bike' : 'ped'; }
 function routeLabel(st, e) {
   if (e.k === 'p') return 'Crossing ' + legNameOf(st, e.from) + ' → toward ' + legNameOf(st, e.to);
-  return e.from === e.to ? legNameOf(st, e.from) + ' U-turn' : 'From ' + legNameOf(st, e.from) + ' → ' + legNameOf(st, e.to);
+  var F = st.legs.filter(function (l) { return l.id === e.from; })[0], T = st.legs.filter(function (l) { return l.id === e.to; })[0];
+  if (!F || !T) return legNameOf(st, e.from) + ' → ' + legNameOf(st, e.to);
+  var hd = dirOf((F.angle + 180) % 360).n + 'B';   // direction of travel: from the north leg = southbound (SB)
+  if (e.from === e.to) return hd + 'U';
+  var tl = turnLabel(turnOf(F.angle, T.angle));
+  return hd + (tl === 'THRU' ? 'T' : tl === 'LEFT' ? 'L' : tl === 'RIGHT' ? 'R' : tl === 'BEAR L' ? 'BL' : tl === 'BEAR R' ? 'BR' : tl === 'SHARP L' ? 'SL' : 'SR');
 }
 function describe(st, e) { return hhmm(e.t) + ' ' + kindLabel(e) + ' · ' + routeLabel(st, e); }
 
