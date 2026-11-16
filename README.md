@@ -113,3 +113,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v33
 - Count screen: even 8-unit gaps between all buttons; button blocks centred on and sized to the road width.
+
+## v34
+- The last-count bar is itself the button that opens the Recent list (›); the separate Recent button is gone. Undo stays.

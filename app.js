@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '33 (16 Nov 2026)';
+var APP_VERSION = '34 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
@@ -460,7 +460,7 @@ function renderCount() {
     '<div class="sub"><span id="clock"></span></div></div><div class="ivn"><button id="ivprev" class="hb sm">◀</button><b id="binlabel"></b><button id="ivnext" class="hb sm">▶</button><button id="ivlive" class="hb sm live">Live</button></div>' +
     '<div class="acts">' + (S.test ? '<button id="tjump" class="hb">+15</button>' : '') + '<button id="notesbtn" class="hb">Notes</button>' + (S.test ? '' : '<button id="legsbtn" class="hb">Legs</button>') + '<button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button></div>' +
     '<button id="stop" class="hb stop stopr">Stop</button>' +
-    '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
+    '<div id="last" class="last"><button id="recent" class="lt"><span id="lasttxt"></span></button><button id="undo" class="hb">↶ Undo</button></div></header>' +
     '<div class="cmain"><aside class="ctl">' +
     (panel ? '' : '<nav class="modes">' + [['veh', 'Vehicles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>') +
     (panel || mode === 'veh' ? '<nav class="classes">' + clsBtnsHTML() + '</nav><p class="clshint">Heavy vehicle and Bike count once, then go back to Car. Double-tap to keep one selected.</p>' : '') +
