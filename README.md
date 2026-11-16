@@ -104,3 +104,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v30
 - Pedestrian entries use the leg's compass side ("North leg · EB"), not its street name.
+
+## v31
+- Fix: v29/v30 pedestrian label change accidentally overrode vehicle/bike movement labels (missing braces). Vehicles/bikes show SBR etc. again; pedestrians show "North leg · EB".

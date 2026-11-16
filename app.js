@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '30 (16 Nov 2026)';
+var APP_VERSION = '31 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
@@ -513,10 +513,12 @@ var hms = function (t) { var d = new Date(t); return pad(d.getHours()) + ':' + p
 function kindLabel(e) { return e.k === 'v' ? (e.c === 'car' ? 'Car' : 'Heavy vehicle') : e.k === 'b' ? 'Bike' : 'Pedestrian'; }
 function chipCls(e) { return e.k === 'v' ? (e.c === 'car' ? 'car' : 'truck') : e.k === 'b' ? 'bike' : 'ped'; }
 function routeLabel(st, e) {
-  if (e.k === 'p') var wd = walkDir(e.to === e.from ? '' : e.from, e.to), ab = '';   // walking direction, e.g. East -> EB
+  if (e.k === 'p') {
+    var wd = walkDir(e.from, e.to), ab = '';   // walking direction, e.g. East -> EB
     DIRS.forEach(function (d) { if (d.f === wd) ab = d.n + 'B'; });
     var fl = st.legs.filter(function (l) { return l.id === e.from; })[0];   // compass side of the leg, not its street name
     return (fl ? dirOf(fl.angle).f : legNameOf(st, e.from)) + ' leg' + (ab ? ' · ' + ab : '');
+  }
   var F = st.legs.filter(function (l) { return l.id === e.from; })[0], T = st.legs.filter(function (l) { return l.id === e.to; })[0];
   if (!F || !T) return legNameOf(st, e.from) + ' → ' + legNameOf(st, e.to);
   var hd = dirOf((F.angle + 180) % 360).n + 'B';   // direction of travel: from the north leg = southbound (SB)
