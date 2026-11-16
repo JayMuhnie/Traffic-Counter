@@ -4,8 +4,10 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '26 (15 Nov 2026)';
+var APP_VERSION = '27 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
+// NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
+var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
 var hhmm = function (t) { var d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
@@ -41,7 +43,7 @@ function newStudy(prev) {
     : [{ name: 'North', angle: 0 }, { name: 'East', angle: 90 }, { name: 'South', angle: 180 }, { name: 'West', angle: 270 }];
   return {
     id: uid(), site: prev ? prev.site : '', observer: prev ? prev.observer : '', weather: '',
-    created: Date.now(), startedAt: null, endedAt: null,
+    created: NOW(), startedAt: null, endedAt: null,
     legs: base.map(function (l) { return { id: uid(), name: l.name, angle: l.angle, removed: false }; }),
     events: [], notes: []
   };
@@ -68,7 +70,7 @@ var view = S.startedAt ? (S.endedAt ? 'results' : 'count') : 'setup';
 var app = $('#app');
 var activeLegs = function () { return S.legs.filter(function (l) { return !l.removed; }); };
 var legNameOf = function (st, id) { var l = st.legs.find(function (x) { return x.id === id; }); return l ? l.name : '?'; };
-var nextMark = function () { var n = Date.now(), b = binStart(n); return b === n ? n : b + BIN; };
+var nextMark = function () { var n = NOW(), b = binStart(n); return b === n ? n : b + BIN; };
 
 function toast(msg) {
   var t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -335,7 +337,7 @@ function renderSetup() {
     '<div class="card"><h2>Legs</h2><div id="legs"></div></div>' +
     '<div class="card"><h2>Start Time</h2><label class="chk"><input type="checkbox" id="align"' + (alignStart ? ' checked' : '') + '> Start at the next 15-minute mark</label><div class="hint" id="alignhint"></div></div>' +
     '<button class="big go" id="start">Start Count</button>' +
-    '<div class="row"><button class="ghost" id="hist">Past Counts (' + H.length + ')</button></div>' +
+    '<div class="row"><button class="ghost" id="hist">Past Counts (' + H.length + ')</button><button class="ghost" id="testtools">Test Tools</button></div>' +
     '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export your files after each count.<br>To install: Safari → Share → Add to Home Screen.<br>App version ' + APP_VERSION + ' <button class="ghost" id="chkupd" style="min-height:36px;padding:4px 10px;margin-left:8px">Check for Updates</button></p></div>';
   legEditor($('#legs'));
   $('#site').addEventListener('input', function (e) { S.site = e.target.value; persist(); });
@@ -442,7 +444,7 @@ function applyCls() {
   var st = $('.stage'); if (st) st.style.setProperty('--c', clsColour());
 }
 function clsTap(c) {
-  var now = Date.now();
+  var now = NOW();
   if (c === 'car') { cls = 'car'; clsLocked = false; }
   else if (cls === c && !clsLocked && now - lastClsTap < 500) { clsLocked = true; toast(CLS_LABEL[c] + ' stays selected — tap Car to switch back'); }
   else { cls = c; clsLocked = false; }
@@ -456,7 +458,7 @@ function renderCount() {
   app.innerHTML =
     '<div class="cv"><header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
     '<div class="sub"><span id="clock"></span></div></div><div class="ivn"><button id="ivprev" class="hb sm">◀</button><b id="binlabel"></b><button id="ivnext" class="hb sm">▶</button><button id="ivlive" class="hb sm live">Live</button></div>' +
-    '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button></div>' +
+    '<div class="acts">' + (S.test ? '<button id="tjump" class="hb">+15</button>' : '') + '<button id="notesbtn" class="hb">Notes</button>' + (S.test ? '' : '<button id="legsbtn" class="hb">Legs</button>') + '<button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button></div>' +
     '<button id="stop" class="hb stop stopr">Stop</button>' +
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
     '<div class="cmain"><aside class="ctl">' +
@@ -468,7 +470,7 @@ function renderCount() {
 }
 
 /* live counts for the current interval */
-function curBin() { return viewBin == null ? binStart(Date.now()) : viewBin; }
+function curBin() { return viewBin == null ? binStart(NOW()) : viewBin; }
 function binCounts() {
   var bs = curBin(), be = bs + BIN, m = {}, tot = { v: 0, b: 0, p: 0 };
   for (var i = S.events.length - 1; i >= 0; i--) {
@@ -479,7 +481,7 @@ function binCounts() {
   return { m: m, tot: tot, bs: bs };
 }
 function tick() {
-  var now = Date.now(), ah = $('#alignhint');
+  var now = NOW(), ah = $('#alignhint');
   if (ah) ah.textContent = alignStart ? 'Counting will begin at ' + hhmm(nextMark()) + '. Tapping Start before then is fine.' : 'Counting begins the moment you tap Start (the first interval may be partial).';
   if (view !== 'count') return;
   if (viewBin != null && (viewBin >= binStart(now) || now - lastAct > IDLE_PAST)) { viewBin = null; rmMode = false; }
@@ -495,6 +497,7 @@ function tick() {
   if (left > 0) msg = 'Count starts at ' + hhmm(S.startedAt) + ' — in ' + Math.floor(left / 60000) + ':' + pad(Math.floor(left / 1000) % 60);
   else if (rmMode) msg = 'REMOVE MODE — tap a button to take one count out of ' + hhmm(c.bs) + '–' + hhmm(c.bs + BIN);
   else if (viewBin != null) msg = 'Editing an earlier interval (' + hhmm(c.bs) + '–' + hhmm(c.bs + BIN) + ') — taps are added to it. Back to live in ' + Math.max(0, Math.ceil((IDLE_PAST - (now - lastAct)) / 1000)) + ' s';
+  if (!msg && S.test) msg = 'TEST COUNT (not saved) — tap “+15” (top bar) to jump the clock to the next interval';
   var bn = $('#banner'); bn.textContent = msg; bn.className = rmMode ? 'rmb' : '';
   var stg = $('.stage'); if (stg) { stg.classList[viewBin != null ? 'add' : 'remove']('past'); stg.classList[rmMode ? 'add' : 'remove']('rm'); }
   var rb = $('#rmbtn'); if (rb) { rb.classList[rmMode ? 'add' : 'remove']('on'); rb.textContent = rmMode ? 'Done removing' : '− Remove counts'; }
@@ -522,7 +525,7 @@ function updateLast(pulse) {
   app.querySelectorAll('.mv.lastb').forEach(function (m) { m.classList.remove('lastb'); });
   if (e) { var lm = app.querySelector('.mv[data-k="' + (e.k === 'b' ? 'v' : e.k) + '"][data-from="' + e.from + '"][data-to="' + e.to + '"]'); if (lm) lm.classList.add('lastb'); }
   if (!e) { box.innerHTML = '<span class="mut">Nothing counted yet</span>'; return; }
-  var ago = Math.max(0, Math.round((Date.now() - e.t) / 1000));
+  var ago = Math.max(0, Math.round((NOW() - e.t) / 1000));
   var agoTxt = ago < 60 ? ago + ' s ago' : Math.floor(ago / 60) + ' min ago';
   box.innerHTML = '<span class="chip ' + chipCls(e) + '">' + esc(kindLabel(e)) + '</span>' + esc(routeLabel(S, e)) +
     ' <span class="mut">· ' + hms(e.t) + ' · ' + agoTxt + '</span>';
@@ -576,7 +579,7 @@ function openNotes() {
       if (b.dataset.chip) { ta.value = (ta.value ? ta.value.replace(/\s+$/, '') + '. ' : '') + b.dataset.chip; return; }
       if (b.id === 'noteadd') {
         var txt = ta.value.trim(); if (!txt) { toast('Type a note first'); return; }
-        (S.notes = S.notes || []).push({ t: Date.now(), text: txt });
+        (S.notes = S.notes || []).push({ t: NOW(), text: txt });
         persist(); ta.value = ''; $('#nl').innerHTML = list(); toast('Note added'); return;
       }
       if (b.dataset.a === 'ndel') { S.notes.splice(+b.closest('.nrow').dataset.i, 1); persist(); $('#nl').innerHTML = list(); }
@@ -586,7 +589,7 @@ function openNotes() {
 
 function tap(btn) {
   if (!S.startedAt || S.endedAt) return;
-  var now = Date.now();
+  var now = NOW();
   if (now < S.startedAt) { toast('Count has not started yet'); return; }
   if (rmMode) return removeOne(btn);
   lastAct = now;
@@ -603,14 +606,14 @@ function tap(btn) {
 function ivNav(dir) {
   var first = binStart(S.startedAt), nb = curBin() + dir * BIN;
   if (nb < first) return;
-  viewBin = nb >= binStart(Date.now()) ? null : nb;
+  viewBin = nb >= binStart(NOW()) ? null : nb;
   if (viewBin == null) rmMode = false;
-  lastAct = Date.now(); tick();
+  lastAct = NOW(); tick();
 }
 function removeOne(btn) {
   var bs = curBin(), be = bs + BIN, k = btn.dataset.k, from = btn.dataset.from, to = btn.dataset.to;
   var kinds = k === 'p' ? ['p'] : cls === 'bike' ? ['b', 'v'] : ['v', 'b'];
-  lastAct = Date.now();
+  lastAct = NOW();
   for (var j = 0; j < kinds.length; j++) {
     for (var i = S.events.length - 1; i >= 0; i--) {
       var e = S.events[i];
@@ -671,7 +674,7 @@ function previewHTML() {
 }
 
 function renderResults() {
-  var A = analyze(S), pk = A.peak, running = !S.endedAt;
+  var A = analyze(S, NOW()), pk = A.peak, running = !S.endedAt;
   var tot = A.bins.reduce(function (s, b) { s.car += b.car; s.truck += b.truck; s.veh += b.veh; s.bike += b.bike; s.ped += b.ped; return s; }, { car: 0, truck: 0, veh: 0, bike: 0, ped: 0 });
   var warns = [];
   if (running) warns.push('Count still in progress — the current interval is incomplete.');
@@ -700,6 +703,7 @@ function renderResults() {
     '<button class="hb dark" id="exp1">Excel<small>4 sheets</small></button>' +
     '<button class="hb dark" id="exp2">CSV<small>4 files</small></button></div>' +
     '<div class="kpis">' + peakKpis + '</div>' +
+    (S.test && window.TMC_T ? TMC_T.checkCard(S) : '') +
     matrixHTML(A, S) +
     previewHTML() +
     ((S.notes || []).length ? notesCardHTML(false) : '') + '</div>';
@@ -778,7 +782,7 @@ function offerFiles(items) {
 
 /* ---- tables: rows are intervals, columns are movements grouped by leg (left, thru, right) ---- */
 function exportModel() {
-  var A = analyze(S), pk = A.peak, bins = A.bins, idx = {}, used = {}, usedP = {}, anyU = false;
+  var A = analyze(S, NOW()), pk = A.peak, bins = A.bins, idx = {}, used = {}, usedP = {}, anyU = false;
   bins.forEach(function (b, i) { idx[b.start] = i; b.t = {}; });
   S.events.forEach(function (e) {
     var key = e.from + '>' + e.to;
@@ -1285,13 +1289,13 @@ function openPdfPreview() {
 
 /* ---------- study management ---------- */
 function archiveCurrent() {
-  if (!S.startedAt) return;
-  if (!S.endedAt) S.endedAt = Date.now();
+  if (!S.startedAt || S.test) return;   // test counts are never kept in Past counts
+  if (!S.endedAt) S.endedAt = NOW();
   H.push(S); persistHist();
 }
 function startNew() {
   archiveCurrent();
-  S = newStudy(S); persist(); mode = 'veh'; cls = 'car'; clsLocked = false; viewBin = null; rmMode = false; view = 'setup'; render();
+  S = newStudy(S.test ? null : S); persist(); mode = 'veh'; cls = 'car'; clsLocked = false; viewBin = null; rmMode = false; view = 'setup'; render();
 }
 function openHistory() {
   function list() {
@@ -1312,11 +1316,42 @@ function openHistory() {
         H.splice(i, 1); persistHist(); $('#hl').innerHTML = list();
       } else {
         var chosen = H.splice(i, 1)[0];
-        if (S.startedAt) { if (!S.endedAt) S.endedAt = Date.now(); H.push(S); }
+        if (S.startedAt && !S.test) { if (!S.endedAt) S.endedAt = NOW(); H.push(S); }
         persistHist(); S = chosen; persist(); view = 'results'; closeSheet(); render();
       }
     });
   });
+}
+
+/* ---------- test tools (see selftest.js) ---------- */
+function startTestStudy(kind) {
+  if (S.startedAt && !S.test && !confirm('Your current count will be saved under Past counts first. Continue?')) return;
+  archiveCurrent(); closeSheet();
+  mode = 'veh'; cls = 'car'; clsLocked = false; viewBin = null; rmMode = false;
+  if (kind === 'demo') { S = TMC_T.demoStudy(); persist(); view = 'results'; render(); return; }
+  S = newStudy(null); S.site = 'TEST — time-jump'; S.observer = 'Test'; S.weather = 'Test';
+  var target = binStart(Date.now()) + BIN + 5000;
+  S.test = { kind: 'jump', shift: target - Date.now() }; S.startedAt = NOW(); persist(); view = 'count'; render();
+}
+function openTestTools() {
+  if (!window.TMC_T) { toast('Test tools not loaded'); return; }
+  openSheet('Test tools', '<p class="hint">These make a test count that is marked TEST and never saved in Past counts. Your real counts are not touched.</p>' +
+    '<div class="card"><h2>1 · Self-test (30 seconds)</h2><p class="hint">Builds a 75-minute demo count inside the app and checks every interval, the peak hour, all four tables and the Excel, CSV and PDF files against answers worked out separately.</p><button class="big go" id="tt-self">Run self-test</button><div id="tt-out"></div></div>' +
+    '<div class="card"><h2>2 · Demo count</h2><p class="hint">Loads a finished 183-tap demo count so you can look at the results page, tables and PDF yourself. A check table shows expected vs app.</p><button class="ghost" id="tt-demo">Load demo count</button></div>' +
+    '<div class="card"><h2>3 · Time-jump count (about 5 minutes)</h2><p class="hint">Real taps on the real count screen, but a “+15” button jumps the clock so a 75-minute count takes minutes. You follow a short recipe, then the results page checks the numbers.</p><div>' + TMC_T.recipeHTML() + '</div><button class="ghost" id="tt-jump">Start time-jump count</button></div>',
+    function (box) {
+      box.addEventListener('click', function (e) {
+        var b = e.target.closest('button'); if (!b) return;
+        if (b.id === 'tt-demo') startTestStudy('demo');
+        else if (b.id === 'tt-jump') startTestStudy('jump');
+        else if (b.id === 'tt-self') {
+          var res = TMC_T.runSelf(window.TMC_I), bad = res.filter(function (r) { return !r.ok; }).length;
+          $('#tt-out', box).innerHTML = '<p><b style="color:' + (bad ? '#b91c1c' : '#15803d') + '">' + (bad ? bad + ' of ' + res.length + ' checks FAILED' : 'All ' + res.length + ' checks passed ✓') + '</b></p>' +
+            res.map(function (r) { return '<div class="hint" style="color:' + (r.ok ? '#15803d' : '#b91c1c') + '">' + (r.ok ? '✓ ' : '✗ ') + esc(r.name) + (r.info !== '' && (!r.ok) ? ' — got ' + esc(String(r.info)) : '') + '</div>'; }).join('') +
+            '<p class="hint">' + esc(navigator.userAgent) + '</p>';
+        }
+      });
+    });
 }
 
 /* ---------- events ---------- */
@@ -1328,10 +1363,10 @@ app.addEventListener('touchstart', function (e) {   // count on finger-down: no 
     var el = e.changedTouches[i].target; el = el && el.closest ? el.closest('.mv') : null;
     if (el) { hit = true; tap(el); }
   }
-  if (hit) { lastTouch = Date.now(); if (e.cancelable) e.preventDefault(); }
+  if (hit) { lastTouch = NOW(); if (e.cancelable) e.preventDefault(); }
 }, { passive: false });
 app.addEventListener('click', function (e) {
-  var mvEl = e.target.closest('.mv'); if (mvEl) { if (Date.now() - lastTouch < 700) return; return tap(mvEl); }
+  var mvEl = e.target.closest('.mv'); if (mvEl) { if (NOW() - lastTouch < 700) return; return tap(mvEl); }
   var t = e.target.closest('button'); if (!t) return;
   if (t.dataset.mode) { mode = t.dataset.mode; return render(); }
   if (t.dataset.pv != null && t.dataset.pv !== '') { pvTab = +t.dataset.pv; return render(); }
@@ -1339,13 +1374,13 @@ app.addEventListener('click', function (e) {
   switch (t.id) {
     case 'start':
       if (activeLegs().length < 3) { toast('An intersection needs at least 3 legs'); return; }
-      audio(); S.startedAt = alignStart ? nextMark() : Date.now(); S.endedAt = null;
+      audio(); S.startedAt = alignStart ? nextMark() : NOW(); S.endedAt = null;
       persist(); view = 'count'; render(); break;
     case 'undo': undo(); break;
     case 'ivprev': ivNav(-1); break;
     case 'ivnext': ivNav(1); break;
-    case 'ivlive': viewBin = null; rmMode = false; lastAct = Date.now(); tick(); break;
-    case 'rmbtn': rmMode = !rmMode; lastAct = Date.now(); tick(); break;
+    case 'ivlive': viewBin = null; rmMode = false; lastAct = NOW(); tick(); break;
+    case 'rmbtn': rmMode = !rmMode; lastAct = NOW(); tick(); break;
     case 'recent': openRecent(); break;
     case 'notesbtn': case 'notesres': openNotes(); break;
     case 'snd': soundOn = !soundOn; try { localStorage.setItem(SOUND_KEY, soundOn ? '1' : '0'); } catch (e2) {} t.textContent = soundOn ? '🔊' : '🔇'; if (soundOn) sound('car'); break;
@@ -1353,7 +1388,7 @@ app.addEventListener('click', function (e) {
     case 'resbtn': view = 'results'; releaseAwake(); render(); break;
     case 'back': view = 'count'; render(); break;
     case 'stop':
-      if (confirm('Stop counting and view results?')) { S.endedAt = Date.now(); persist(); releaseAwake(); view = 'results'; render(); }
+      if (confirm('Stop counting and view results?')) { S.endedAt = NOW(); persist(); releaseAwake(); view = 'results'; render(); }
       break;
     case 'resume': S.endedAt = null; persist(); view = 'count'; render(); break;
     case 'exp1': exportExcel(); break;
@@ -1361,6 +1396,8 @@ app.addEventListener('click', function (e) {
     case 'pdfbtn': openPdfPreview(); break;
     case 'newcount': if (confirm('Start a new count? This one is saved under Past counts.')) startNew(); break;
     case 'hist': openHistory(); break;
+    case 'testtools': openTestTools(); break;
+    case 'tjump': S.test.shift = (S.test.shift || 0) + (binStart(NOW()) + BIN + 5000 - NOW()); viewBin = null; rmMode = false; lastAct = NOW(); persist(); tick(); toast('Clock is now ' + hhmm(NOW())); break;
     case 'chkupd': toast('Checking…'); checkUpdate(true); break;
   }
 });
@@ -1402,4 +1439,5 @@ if ('serviceWorker' in navigator) {
     reloaded = true; location.reload();
   });
 }
+window.TMC_I = { withStudy: function (st, fn) { var old = S; S = st; try { return fn(); } finally { S = old; } }, buildSheets: buildSheets, xlsxBlob: xlsxBlob, csv: csv, buildPdfPages: buildPdfPages, pdfBlob: pdfBlob };
 })();
