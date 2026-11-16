@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '34 (16 Nov 2026)';
+var APP_VERSION = '35 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };

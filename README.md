@@ -116,3 +116,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v34
 - The last-count bar is itself the button that opens the Recent list (›); the separate Recent button is gone. Undo stays.
+
+## v35
+- Colour clean-up: the last-count bar is now white with dark text (was grey on grey); header buttons use a translucent white on the navy header; secondary grey text darkened for contrast. Class colours (blue car, orange heavy, violet bike, teal pedestrian) unchanged.
