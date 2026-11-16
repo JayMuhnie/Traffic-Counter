@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '25 (15 Nov 2026)';
+var APP_VERSION = '26 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -257,12 +257,12 @@ function legEditor(box) {
   function drawPreview() { var pv = box.querySelector('.pv'); if (pv) pv.innerHTML = roadsSVG(sortedLegs()); }
   function draw() {
     var legs = sortedLegs();
-    box.innerHTML = '<div class="xpv"></div>' + legs.map(function (l) {
+    box.innerHTML = '<div class="pv"></div>' + legs.map(function (l) {
       return '<div class="legrow" data-id="' + l.id + '"><input class="ln" value="' + esc(l.name) + '" aria-label="Leg name">' +
         '<select class="la" aria-label="Direction this leg points">' + DIRS.map(function (d) { return '<option value="' + d.a + '"' + (d.a === l.angle ? ' selected' : '') + '>' + d.n + '</option>'; }).join('') + '</select>' +
         '<button data-a="del" class="del"' + (legs.length <= 3 ? ' disabled' : '') + '>✕</button></div>';
     }).join('') +
-      '<button data-a="add" class="ghost add"' + (legs.length >= MAX_LEGS ? ' disabled' : '') + '>+ Add leg</button>' +
+      '<button data-a="add" class="ghost add"' + (legs.length >= MAX_LEGS ? ' disabled' : '') + '>+ Add Leg</button>' +
       '<p class="hint">Choose the direction each leg points on the diagram (N = top of the screen). Up to 4 legs pointing N, E, S or W get the lane layout; 5 or more legs, or diagonal legs, use a compact layout. 3 to ' + MAX_LEGS + ' legs.</p>';
     drawPreview();
   }
@@ -327,15 +327,16 @@ function render() {
 
 function renderSetup() {
   app.innerHTML =
-    '<div class="page"><h1>New traffic count</h1>' +
-    '<div class="card"><label>Site / intersection<input id="site" type="text" value="' + esc(S.site) + '" placeholder="e.g. Bank St @ Gladstone Ave"></label>' +
+    '<div class="shead"><div class="sbar"></div><div class="sin"><h1>New Traffic Count</h1><p>Set up the intersection, then start counting.</p></div></div>' +
+    '<div class="page setup">' +
+    '<div class="card"><h2>Site Details</h2><label>Site / Intersection<input id="site" type="text" value="' + esc(S.site) + '" placeholder="e.g. Bank St @ Gladstone Ave"></label>' +
     '<label>Observer<input id="obs" type="text" value="' + esc(S.observer) + '" placeholder="Your name"></label>' +
-    '<label>Weather conditions<input id="wx" type="text" value="' + esc(S.weather || '') + '" placeholder="e.g. Sunny, dry, 5°C"></label></div>' +
+    '<label>Weather Conditions<input id="wx" type="text" value="' + esc(S.weather || '') + '" placeholder="e.g. Sunny, dry, 5°C"></label></div>' +
     '<div class="card"><h2>Legs</h2><div id="legs"></div></div>' +
-    '<div class="card"><label class="chk"><input type="checkbox" id="align"' + (alignStart ? ' checked' : '') + '> Start at the next 15-minute mark</label><div class="hint" id="alignhint"></div></div>' +
-    '<button class="big go" id="start">Start count</button>' +
-    '<div class="row"><button class="ghost" id="hist">Past counts (' + H.length + ')</button></div>' +
-    '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export the CSV files after each count.<br>To install: Safari → Share → Add to Home Screen.<br>App version ' + APP_VERSION + ' <button class="ghost" id="chkupd" style="min-height:36px;padding:4px 10px;margin-left:8px">Check for updates</button></p></div>';
+    '<div class="card"><h2>Start Time</h2><label class="chk"><input type="checkbox" id="align"' + (alignStart ? ' checked' : '') + '> Start at the next 15-minute mark</label><div class="hint" id="alignhint"></div></div>' +
+    '<button class="big go" id="start">Start Count</button>' +
+    '<div class="row"><button class="ghost" id="hist">Past Counts (' + H.length + ')</button></div>' +
+    '<p class="foot">Works offline. Counts are saved on this iPad as you tap — export your files after each count.<br>To install: Safari → Share → Add to Home Screen.<br>App version ' + APP_VERSION + ' <button class="ghost" id="chkupd" style="min-height:36px;padding:4px 10px;margin-left:8px">Check for Updates</button></p></div>';
   legEditor($('#legs'));
   $('#site').addEventListener('input', function (e) { S.site = e.target.value; persist(); });
   $('#obs').addEventListener('input', function (e) { S.observer = e.target.value; persist(); });
@@ -1271,9 +1272,9 @@ function openPdfPreview() {
   try { pages = buildPdfPages(); blob = pdfBlob(pages); svgs = pages.map(pagesSVG); } catch (e) { toast('Could not build the PDF: ' + (e && e.message || e)); return; }
   var it = { name: fileBase() + '_summary.pdf', mime: 'application/pdf', blob: blob };
   var can = canShareIt(it);
-  var top = can ? '<div class="row"><button class="hb dark" data-a="share">Share / Save PDF</button>' + (CAN_DL ? '<a class="ghost lnk" target="_blank">Open</a>' : '') + '</div>'
-    : '<p class="hint"><b>Saving the pages:</b> this iPad (iOS 12) cannot send PDF files from a Home Screen app. Touch and hold a page below, then tap <b>Save Image</b> (to Photos) or <b>Share</b> to email or AirDrop it. The Excel / CSV export has the same numbers as tables.</p>';
-  openSheet('Summary PDF preview', top + svgs.map(function (sv, i) { return '<div class="pdfpg" data-pg="' + i + '">' + sv + '</div>'; }).join(''), function (box, sheet) {
+  var top = can ? '<div class="pvbar"><button class="pvb dark" data-a="share">Share / Save PDF</button>' + (CAN_DL ? '<a class="pvb lnk" target="_blank">Open</a>' : '') + '</div>'
+    : '<div class="tip"><b>Saving the pages:</b> touch and hold a page, then tap <b>Save Image</b> (to Photos) or <b>Share</b> to email or AirDrop it. This iPad (iOS 12) cannot send PDF files from a Home Screen app. The Excel / CSV export has the same numbers as tables.</div>';
+  openSheet('Summary PDF Preview', top + svgs.map(function (sv, i) { return '<div class="pdfpg" data-pg="' + i + '">' + sv + '</div>'; }).join(''), function (box, sheet) {
     var a = box.querySelector('a.lnk'); if (a) { try { a.href = URL.createObjectURL(blob); } catch (e) {} }
     box.addEventListener('click', function (e) { var b = e.target.closest('button[data-a]'); if (b) shareOne(it); });
     if (!can) svgs.forEach(function (sv, i) {   // pictures can be touched-and-held to save or share

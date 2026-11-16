@@ -85,3 +85,8 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 ## v25
 - PDF: "Counted" -> "Time period:"; titles in title case (Full Count — All Volumes, Peak Hour, Passenger Vehicles, Heavy Vehicles, Bicycles, Pedestrians); observer name removed from headers and footer.
 - Pedestrian columns: North before South (East still before West) everywhere.
+
+## v26
+- Setup page restyled to match the PDF: white header band with blue top bar, title-case headings, neutral cards, one blue accent, blue Start Count button, narrower centred form.
+- PDF preview window: Share / Save PDF and Open are now equal-width, same-height buttons; the iOS 12 note is a compact tip box.
+- Fixed a regression from v18: the intersection preview on the setup page (leg editor) was missing.
