@@ -77,3 +77,11 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v23
 - PDF diagram: simpler palette (greys plus one blue accent); "How to read this page" legend removed.
+
+## v24
+- U-turn button on the count screen is now the same size and style as the other turn buttons, labelled "U-TURN", and lined up with the left-turn column (it was a small flat strip, rotated on east/west legs).
+- PDF diagram: U-turn card is the same 100x100 size as the others and aligned with the left-turn column (it was 104 wide and 8 units off).
+
+## v25
+- PDF: "Counted" -> "Time period:"; titles in title case (Full Count — All Volumes, Peak Hour, Passenger Vehicles, Heavy Vehicles, Bicycles, Pedestrians); observer name removed from headers and footer.
+- Pedestrian columns: North before South (East still before West) everywhere.

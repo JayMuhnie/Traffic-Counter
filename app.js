@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '23 (15 Nov 2026)';
+var APP_VERSION = '25 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -187,7 +187,7 @@ function walkDir(from, to) {   // compass direction a pedestrian walks when cros
   if (legs[(i - 1 + n) % n].id === to) return dirOf((th + 270) % 360).f;
   return '';
 }
-var PED_PREF = { East: 0, South: 0, Southeast: 0, Southwest: 0, West: 1, North: 1, Northwest: 1, Northeast: 1 };   // one order everywhere: East before West, South before North
+var PED_PREF = { East: 0, Northeast: 0, Southeast: 0, North: 0, West: 1, Northwest: 1, Southwest: 1, South: 1 };   // one order everywhere: North before South, East before West
 function pedSort(fromId, legsArr) { return legsArr.slice().sort(function (a, b) { var pa = PED_PREF[walkDir(fromId, a.id)], pb = PED_PREF[walkDir(fromId, b.id)]; return (pa == null ? 2 : pa) - (pb == null ? 2 : pb); }); }
 function turnText(t) { var l = turnLabel(t); return l === 'SHARP L' ? 'Sharp left' : l === 'SHARP R' ? 'Sharp right' : l === 'BEAR L' ? 'Bear left' : l === 'BEAR R' ? 'Bear right' : cap(l.toLowerCase()); }
 function turnLabel(t) {
@@ -352,7 +352,7 @@ function arrowIcon(h, dt) {   // bent arrow: arrives heading h, leaves heading d
 }
 function uIcon(h) {
   var a = Math.atan2(-h.x, h.y) * 180 / Math.PI;
-  return '<g transform="translate(0 -6) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
+  return '<g transform="translate(0 -2) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
 }
 function badgeG(k, from, to, cx, cy) {   // small purple bubble: bicycles that made this movement in the current interval
   return k === 'v' ? '<g class="bk" data-bk="b|' + from + '|' + to + '" visibility="hidden"><circle cx="' + cx + '" cy="' + cy + '" r="15"/><text x="' + cx + '" y="' + (cy + 6) + '">0</text></g>' : '';
@@ -422,8 +422,8 @@ function panelSVG(legs) {
       var tn = turnOf(L.angle, D.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0, p = at(287, lam, right);   // + lam = driver's right
       o += mvG('v', L.id, D.id, turnLabel(tn), arrowIcon(hd, uv(D.angle)), p.x, p.y, 1.06, '');
     });
-    var pu = at(368, -96, right);
-    o += flatG('v', L.id, L.id, uIcon(hd), pu.x, pu.y, vert ? 56 : 128, vert ? 128 : 56, ' u', vert);
+    var pu = at(287 + 100, -104, right);   // same size as the turn buttons, in line with the left-turn column
+    o += mvG('v', L.id, L.id, 'U-TURN', uIcon(hd), pu.x, pu.y, 1.06, ' u');
   });
   return svgWrap(o + COMPASS);
 }
@@ -1051,9 +1051,9 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
         var tn = turnOf(L.angle, Dl.angle), lam = tn < 0 ? -104 : tn > 0 ? 104 : 0;
         card(at(292, lam, right), 100, 100, hd, uv(Dl.angle), V.m[L.id + '>' + Dl.id], false);
       });
-      card(at(395, -96, right), 104, 100, hd, hd, V.m[L.id + '>' + L.id], true);
+      card(at(395, -104, right), 100, 100, hd, hd, V.m[L.id + '>' + L.id], true);
       // street name and approach total, in the grass beside the end of the road
-      var l1 = fitTxt(L.name, 8.5, true, 150), l2 = 'Approach total: ' + ent;
+      var l1 = fitTxt(L.name, 8.5, true, 150), l2 = 'Approach Total: ' + ent;
       var w = (Math.max(tw(l1, 8.5, true), tw(l2, 8, true)) + 14) / (sc), h = 27 / sc, sd = { x: -d.y, y: d.x };
       var off = rw + 10 + Math.abs(sd.x) * w / 2 + Math.abs(sd.y) * h / 2, R = 470;
       var cx = 500 + d.x * R + sd.x * off, cy = 500 + d.y * R + sd.y * off;
@@ -1072,7 +1072,7 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
       D.rect(x0, y0, bwU, bhU, { fill: '#ffffff', stroke: PAL.line, sw: 1, r: 6 * k });
       D.rect(x0, y0, bwU, 22 * k, { fill: PAL.acc, r: 6 * k });
       D.text(X(bw / 2), Y(9.5), fitTxt(L.name + ' (' + dirOf(L.angle).n + ')', 8, true, bw - 8), 8, { bold: true, color: '#ffffff', anchor: 'm' });
-      D.text(X(bw / 2), Y(18.5), 'Approach total: ' + ent, 7, { bold: true, color: PAL.accL, anchor: 'm' });
+      D.text(X(bw / 2), Y(18.5), 'Approach Total: ' + ent, 7, { bold: true, color: PAL.accL, anchor: 'm' });
       ex.forEach(function (x, j) {
         var mv = V.m[L.id + '>' + x.leg.id], vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0, yc = 26 + j * rh + 6;
         drawArrow(D, { x: X(9), y: Y(yc) }, hd, uv(x.leg.angle), 3.6 * k, PAL.acc, x.u, 0.6);
@@ -1128,13 +1128,13 @@ function tablePages(M, title, cols, valFn, rowTot) {
   var sum = function (sel) { return cols.map(function (c, j) { return sel.reduce(function (s, r) { return s + r.vals[j]; }, 0); }); };
   var tv = sum(rows), trow = { label: 'Total', vals: tv, tot: rows.reduce(function (s, r) { return s + r.tot; }, 0), bold: true };
   var all = rows.slice(); all.push(trow);
-  if (pk) { var pr = rows.slice(pk.i, pk.i + 4); all.push({ label: 'Peak hour', vals: sum(pr), tot: pr.reduce(function (s, r) { return s + r.tot; }, 0), bold: true, hi: true }); }
+  if (pk) { var pr = rows.slice(pk.i, pk.i + 4); all.push({ label: 'Peak Hour', vals: sum(pr), tot: pr.reduce(function (s, r) { return s + r.tot; }, 0), bold: true, hi: true }); }
   var firstW = multiDay ? 92 : 74, totW = 36, avail = PW - 56 - firstW - totW, cw = Math.min(46, avail / Math.max(1, cols.length)), left = 28;
   var fs = Math.max(5, Math.min(9, cw / 3.4)), rh = 15, top = 134, perPage = Math.floor((PH - 52 - top) / rh);
   var pages = [], pi = 0;
   do {
     var chunk = all.slice(pi * perPage, (pi + 1) * perPage), ops = [], y = top;
-    pageHeader(ops, title + (pi ? ' (continued)' : ''), [ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : '') + (S.weather ? ' · ' + S.weather : '') + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : '')]);
+    pageHeader(ops, title + (pi ? ' (Continued)' : ''), [ymdw(S.startedAt) + (S.weather ? ' · ' + S.weather : '') + (pk ? ' · shaded rows = peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end) : '')]);
     // group headers
     var gx = left + firstW, k = 0;
     while (k < cols.length) {
@@ -1165,15 +1165,15 @@ function tablePages(M, title, cols, valFn, rowTot) {
 function buildPdfPages() {
   var M = exportModel(), pk = M.pk, pages = [], n = M.bins.length;
   var span = hhmm(M.bins[0].start) + '–' + hhmm(M.bins[n - 1].start + BIN);
-  var meta = ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : ''), foot = (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt) + (S.observer ? ' · ' + S.observer : '');
+  var meta = ymdw(S.startedAt), foot = (S.site || 'Untitled count') + ' · ' + ymdw(S.startedAt);
   var wx = S.weather ? 'Weather: ' + S.weather + ' · ' : '';
-  pages.push(diagramPage(M, 0, n - 1, 'Full count — all volumes', [meta, wx + 'Counted ' + span], 'full'));
-  if (pk) pages.push(diagramPage(M, pk.i, pk.i + 3, 'Peak hour — ' + hhmm(pk.start) + '–' + hhmm(pk.end), [meta, wx + 'Busiest four consecutive complete 15-minute intervals by cars + heavy vehicles (' + pk.vol + ' vehicles)'], 'peak'));
-  else pages.push(diagramPage(M, 0, n - 1, 'Peak hour — not available', [meta, 'A peak hour needs four complete 15-minute intervals in a row; only ' + M.A.nFull + ' complete interval' + (M.A.nFull === 1 ? ' was' : 's were') + ' counted.', 'Showing everything counted (' + span + ') instead.'], 'nopeak'));
+  pages.push(diagramPage(M, 0, n - 1, 'Full Count — All Volumes', [meta, wx + 'Time period: ' + span], 'full'));
+  if (pk) pages.push(diagramPage(M, pk.i, pk.i + 3, 'Peak Hour — ' + hhmm(pk.start) + '–' + hhmm(pk.end), [meta, wx + 'Busiest four consecutive complete 15-minute intervals by cars + heavy vehicles (' + pk.vol + ' vehicles)'], 'peak'));
+  else pages.push(diagramPage(M, 0, n - 1, 'Peak Hour — Not Available', [meta, 'A peak hour needs four complete 15-minute intervals in a row; only ' + M.A.nFull + ' complete interval' + (M.A.nFull === 1 ? ' was' : 's were') + ' counted.', 'Showing the full time period (' + span + ') instead.'], 'nopeak'));
   var cell = function (cls) { return function (b, c) { var o = b.t[c.k]; return o ? o[cls] : 0; }; };
   var sumOf = function (v) { return v.reduce(function (s, x) { return s + x; }, 0); };
-  [['Cars', 'car'], ['Heavy vehicles', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0] + ' by movement', M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
-  pages = pages.concat(tablePages(M, 'Pedestrians by crosswalk', M.pcols, cell('ped'), function (b, v) { return sumOf(v); }));
+  [['Passenger Vehicles', 'car'], ['Heavy Vehicles', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0], M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
+  pages = pages.concat(tablePages(M, 'Pedestrians', M.pcols, cell('ped'), function (b, v) { return sumOf(v); }));
   pages.forEach(function (ops, i) {
     ops.push({ t: 'text', x: 28, y: PH - 9, s: foot, size: 8, color: '#94a3b8' });
     ops.push({ t: 'text', x: PW - 28, y: PH - 9, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
