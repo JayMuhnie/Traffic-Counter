@@ -68,3 +68,9 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 ## v21
 - Pedestrian columns use one order on every leg (West before East, North before South).
 - Count screen: Veh/Bike/Ped totals removed; Stop is pinned to the far right.
+
+## v22
+- Pedestrian columns: East before West, South before North, on every leg (table, PDF, preview).
+- Verified with an automated test that every count-screen pedestrian and vehicle button lands in the matching table column.
+- Summary PDF is now portrait US Letter (612 x 792 pt), and the preview shows a true letter page. The site name, page title, details and legend are one header band at the top.
+- New diagram palette: light grey-blue roads with white dashes, white movement cards, blue arrows/street names, amber heavy %, violet bikes, green pedestrians.

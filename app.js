@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '21 (15 Nov 2026)';
+var APP_VERSION = '22 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -187,6 +187,9 @@ function walkDir(from, to) {   // compass direction a pedestrian walks when cros
   if (legs[(i - 1 + n) % n].id === to) return dirOf((th + 270) % 360).f;
   return '';
 }
+var PED_PREF = { East: 0, South: 0, Southeast: 0, Southwest: 0, West: 1, North: 1, Northwest: 1, Northeast: 1 };   // one order everywhere: East before West, South before North
+function pedSort(fromId, legsArr) { return legsArr.slice().sort(function (a, b) { var pa = PED_PREF[walkDir(fromId, a.id)], pb = PED_PREF[walkDir(fromId, b.id)]; return (pa == null ? 2 : pa) - (pb == null ? 2 : pb); }); }
+function turnText(t) { var l = turnLabel(t); return l === 'SHARP L' ? 'Sharp left' : l === 'SHARP R' ? 'Sharp right' : l === 'BEAR L' ? 'Bear left' : l === 'BEAR R' ? 'Bear right' : cap(l.toLowerCase()); }
 function turnLabel(t) {
   var a = Math.abs(t), sd = t < 0 ? 'L' : 'R';
   if (a < 23) return 'THRU';
@@ -805,8 +808,8 @@ function exportModel() {
     var i = active.indexOf(L), n = active.length, nb = [];
     if (i >= 0) nb = [active[(i - 1 + n) % n], active[(i + 1) % n]];
     Object.keys(usedP).forEach(function (k) { var p = k.split('>'); if (p[0] === L.id) { var g = S.legs.filter(function (x) { return x.id === p[1]; })[0]; if (g && nb.indexOf(g) < 0) nb.push(g); } });
-    var first = true, PREF = { West: 0, North: 0, Northwest: 0, Northeast: 0, East: 1, South: 1, Southeast: 1, Southwest: 1 };   // same order on every leg: West before East, North before South
-    nb.sort(function (a, b) { var pa = PREF[walkDir(L.id, a.id)], pb = PREF[walkDir(L.id, b.id)]; return (pa == null ? 2 : pa) - (pb == null ? 2 : pb); });
+    var first = true;
+    nb = pedSort(L.id, nb);
     nb.forEach(function (g) {
       var key = L.id + '>' + g.id; if (seen[key]) return; seen[key] = 1;
       if (!(act[L.id] && act[g.id]) && !usedP[key]) return;
@@ -934,7 +937,7 @@ function exportExcel() {
 }
 
 /* ---------- summary PDF: drawing ops feed both the in-app preview (SVG) and the PDF file ---------- */
-var PW = 792, PH = 612;   // US Letter, landscape (points)
+var PW = 612, PH = 792;   // US Letter, portrait (points)
 var _mc = null;
 function tw(s, size, bold) {
   try { if (!_mc) _mc = document.createElement('canvas').getContext('2d'); _mc.font = (bold ? 'bold ' : '') + '100px Helvetica, Arial, sans-serif'; return _mc.measureText(s).width * size / 100; }
@@ -966,10 +969,15 @@ function drawArrow(D, ac, hd, dt, len, col, u, hs) {
   D.poly([[h0.x, h0.y], [h1.x, h1.y], [h2.x, h2.y]], { fill: col });
 }
 function numFmt(n) { return String(n); }
-function pageHeader(ops, title, lines) {
-  ops.push({ t: 'text', x: 28, y: 27, s: fitTxt(S.site || 'Untitled count', 15, true, 736), size: 15, bold: true, color: '#0f172a' });
-  ops.push({ t: 'text', x: 28, y: 43, s: title, size: 12.5, bold: true, color: '#1d4ed8' });
-  lines.forEach(function (ln, i) { ops.push({ t: 'text', x: 28, y: 56 + i * 11, s: fitTxt(ln, 8.5, false, 736), size: 8.5, color: '#475569' }); });
+var PAL = { acc: '#2563eb', accL: '#dbeafe', band: '#eff6ff', ink: '#0f172a', sub: '#475569', frame: '#f8fafc', road: '#d5deea', line: '#cbd5e1', heavy: '#b45309', bike: '#7c3aed', ped: '#047857', pedBg: '#ecfdf5', pedLn: '#6ee7b7' };
+function pageHeader(ops, title, lines, hh) {   // one header band: site, page title, details (diagram pages add the legend inside it)
+  hh = hh || 78;
+  ops.push({ t: 'rect', x: 0, y: 0, w: PW, h: hh, fill: PAL.band });
+  ops.push({ t: 'rect', x: 0, y: 0, w: PW, h: 6, fill: PAL.acc });
+  ops.push({ t: 'line', x1: 0, y1: hh, x2: PW, y2: hh, stroke: '#bfdbfe', sw: 1 });
+  ops.push({ t: 'text', x: 28, y: 33, s: fitTxt(S.site || 'Untitled count', 17, true, PW - 56), size: 17, bold: true, color: PAL.ink });
+  ops.push({ t: 'text', x: 28, y: 51, s: fitTxt(title, 12.5, true, PW - 56), size: 12.5, bold: true, color: PAL.acc });
+  lines.forEach(function (ln, i) { ops.push({ t: 'text', x: 28, y: 65 + i * 11, s: fitTxt(ln, 8.5, false, PW - 56), size: 8.5, color: PAL.sub }); });
 }
 
 /* ---- icons and the summary diagram (independent of the counting screen) ---- */
@@ -997,66 +1005,64 @@ function wrapTxt(s, size, bold, maxw) {
 function pctHeavy(mv) { var v = mv ? mv.car + mv.truck : 0; return v ? (mv.truck / v * 100).toFixed(1) + '% heavy' : '–'; }
 var DIR_SHORT = function (f) { for (var i = 0; i < DIRS.length; i++) if (DIRS[i].f === f) return DIRS[i].n; return ''; };
 
-function legendOps(x, y, w) {
-  var G = Dg(0, 0, 1), o = G.ops, k = 1;
-  o.push({ t: 'text', x: x, y: y, s: 'HOW TO READ THIS PAGE', size: 8, bold: true, color: '#0f172a' }); y += 12;
-  var item = function (drawSample, text, hh) {
-    drawSample(y);
-    var lines = wrapTxt(text, 7.2, false, w - 56);
-    lines.forEach(function (ln, i) { o.push({ t: 'text', x: x + 54, y: y + 8 + i * 9, s: ln, size: 7.2, color: '#334155' }); });
-    y += Math.max(hh, lines.length * 9 + 6);
+function legendOps(x, y, w) {   // horizontal legend that lives inside the header band
+  var G = Dg(0, 0, 1), o = G.ops, cw = w / 5, y0 = y + 7;
+  o.push({ t: 'text', x: x, y: y, s: 'HOW TO READ THIS PAGE', size: 7, bold: true, color: PAL.sub });
+  var item = function (i, draw, text) {
+    var sx = x + i * cw; draw(sx, y0);
+    wrapTxt(text, 6.8, false, cw - 10).forEach(function (ln, j) { o.push({ t: 'text', x: sx, y: y0 + 51 + j * 8.4, s: ln, size: 6.8, color: '#334155' }); });
   };
-  item(function (yy) {
-    G.rect(x, yy, 48, 46, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 6 });
-    drawArrow(G, { x: x + 12, y: yy + 10 }, { x: 0, y: -1 }, { x: 1, y: 0 }, 5, '#1e3a8a', false, 0.5);
-    G.text(x + 33, yy + 14.5, '123', 10, { bold: true, color: '#0f172a', anchor: 'm' });
-    G.text(x + 24, yy + 26, '8.1% heavy', 6.2, { color: '#c2410c', anchor: 'm' });
-    iconBike(G, x + 14, yy + 37, 9, '#6d28d9'); G.text(x + 31, yy + 39.5, '4', 7, { bold: true, color: '#6d28d9', anchor: 'm' });
-  }, 'Vehicles making this movement (cars + heavy vehicles). The arrow shows the turn.', 54);
-  item(function (yy) { G.text(x + 23, yy + 9, '8.1% heavy', 7.5, { bold: true, color: '#c2410c', anchor: 'm' }); }, 'Share of those vehicles that were heavy vehicles (trucks and buses).', 20);
-  item(function (yy) { iconBike(G, x + 14, yy + 8, 14, '#6d28d9'); G.text(x + 32, yy + 11, '4', 9, { bold: true, color: '#6d28d9', anchor: 'm' }); }, 'Bicycles making this movement (not included in the vehicle numbers).', 24);
-  item(function (yy) {
-    G.rect(x, yy, 50, 24, { fill: '#f0fdfa', stroke: '#0f766e', sw: 0.9, r: 6 });
-    iconPed(G, x + 9, yy + 12, 12, '#115e59');
-    drawArrow(G, { x: x + 21, y: yy + 12 }, { x: 1, y: 0 }, { x: 1, y: 0 }, 3.5, '#115e59', false, 0.5);
-    G.text(x + 40, yy + 15.5, '12', 9, { bold: true, color: '#0f172a', anchor: 'm' });
-  }, 'Pedestrians crossing at that leg, walking in the direction of the arrow.', 32);
-  item(function (yy) {
-    G.rect(x, yy, 50, 22, { fill: '#0f172a', r: 5 });
-    G.text(x + 25, yy + 9, 'Street name', 6.2, { bold: true, color: '#ffffff', anchor: 'm' }); G.text(x + 25, yy + 17.5, 'Approach total: 171', 5, { bold: true, color: '#fde68a', anchor: 'm' });
-  }, 'Name of the street and the total vehicles entering the intersection from it.', 30);
+  item(0, function (sx, yy) {
+    G.rect(sx, yy, 50, 42, { fill: '#ffffff', stroke: PAL.line, sw: 1, r: 6 });
+    drawArrow(G, { x: sx + 12, y: yy + 10 }, { x: 0, y: -1 }, { x: 1, y: 0 }, 5, PAL.acc, false, 0.5);
+    G.text(sx + 33, yy + 14, '123', 10, { bold: true, color: PAL.ink, anchor: 'm' });
+    G.text(sx + 25, yy + 25, '8.1% heavy', 6.2, { color: PAL.heavy, anchor: 'm' });
+    iconBike(G, sx + 14, yy + 35, 9, PAL.bike); G.text(sx + 31, yy + 37.5, '4', 7, { bold: true, color: PAL.bike, anchor: 'm' });
+  }, 'Vehicles on this movement (cars + heavy vehicles). The arrow shows the turn.');
+  item(1, function (sx, yy) { G.text(sx + 28, yy + 22, '8.1% heavy', 9, { bold: true, color: PAL.heavy, anchor: 'm' }); }, 'Share of those vehicles that were heavy (trucks and buses).');
+  item(2, function (sx, yy) { iconBike(G, sx + 16, yy + 20, 18, PAL.bike); G.text(sx + 40, yy + 24, '4', 12, { bold: true, color: PAL.bike, anchor: 'm' }); }, 'Bicycles on this movement. Not included in the vehicle number.');
+  item(3, function (sx, yy) {
+    G.rect(sx, yy + 7, 58, 28, { fill: PAL.pedBg, stroke: PAL.pedLn, sw: 1, r: 6 });
+    iconPed(G, sx + 10, yy + 21, 14, PAL.ped);
+    drawArrow(G, { x: sx + 25, y: yy + 21 }, { x: 1, y: 0 }, { x: 1, y: 0 }, 3.5, PAL.ped, false, 0.5);
+    G.text(sx + 46, yy + 25, '12', 10, { bold: true, color: PAL.ink, anchor: 'm' });
+  }, 'Pedestrians crossing this leg, walking the way the arrow points.');
+  item(4, function (sx, yy) {
+    G.rect(sx, yy + 7, 72, 28, { fill: PAL.acc, r: 6 });
+    G.text(sx + 36, yy + 18, 'Street name', 7, { bold: true, color: '#ffffff', anchor: 'm' }); G.text(sx + 36, yy + 29, 'Approach total: 171', 5.6, { bold: true, color: PAL.accL, anchor: 'm' });
+  }, 'Street name and the vehicles entering the intersection from it.');
   return o;
 }
 
 function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak' | 'nopeak'
-  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = 0.496, k = 1 / sc;
-  var V = volumesIn(M, i0, i1), D = Dg(212, 84, sc);
-  D.rect(0, 0, 1000, 1000, { fill: '#dde7d6', stroke: '#94a3b8', sw: 0.8 });
+  var legs = sortedLegs(), panel = layoutOf(legs) === 'panel', rw = panel ? 160 : 110, n = legs.length, sc = (PW - 56) / 1000, k = 1 / sc;
+  var V = volumesIn(M, i0, i1), D = Dg(28, 196, sc);
+  D.rect(0, 0, 1000, 1000, { fill: PAL.frame, stroke: PAL.line, sw: 0.8 });
   legs.forEach(function (L) {
     var d = uv(L.angle), q = { x: -d.y, y: d.x }, p1 = pt({ x: 500, y: 500 }, q, rw), p2 = pt(p1, d, 480), p3 = pt(pt({ x: 500, y: 500 }, q, -rw), d, 480), p4 = pt({ x: 500, y: 500 }, q, -rw);
-    D.poly([[p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y]], { fill: '#4b5563' });
+    D.poly([[p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y], [p4.x, p4.y]], { fill: PAL.road });
   });
   var cp = []; for (var a = 0; a < 24; a++) cp.push([500 + rw * Math.cos(a * Math.PI / 12), 500 + rw * Math.sin(a * Math.PI / 12)]);
-  D.poly(cp, { fill: '#4b5563' });
-  legs.forEach(function (L) { var d = uv(L.angle), s = pt({ x: 500, y: 500 }, d, rw + 18), e = pt({ x: 500, y: 500 }, d, 480); D.line(s.x, s.y, e.x, e.y, { stroke: '#fbbf24', sw: 1, dash: [5, 4] }); });
+  D.poly(cp, { fill: PAL.road });
+  legs.forEach(function (L) { var d = uv(L.angle), s = pt({ x: 500, y: 500 }, d, rw + 18), e = pt({ x: 500, y: 500 }, d, 480); D.line(s.x, s.y, e.x, e.y, { stroke: '#ffffff', sw: 1.6, dash: [5, 4] }); });
 
   // one movement: arrow, vehicles, % heavy, bicycles
   var fitN = function (str, size, maxw) { return Math.min(size, maxw / Math.max(0.1, tw(String(str), 1, true))); };
   var card = function (c, w, h, hd, dt, mv, u) {
     var vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0, ay = -h * sc / 2 + 11.5, nf = fitN(vv, 11.5, 21), bf = fitN(bk, 8, 15);
-    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 8 });
-    drawArrow(D, { x: c.x - 13 * k, y: c.y + ay * k }, hd, dt, 4.2 * k, '#1e3a8a', u, 0.7);
+    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#ffffff', stroke: PAL.line, sw: 1, r: 8 });
+    drawArrow(D, { x: c.x - 13 * k, y: c.y + ay * k }, hd, dt, 4.2 * k, PAL.acc, u, 0.7);
     D.text(c.x + 11.5 * k, c.y + (ay + nf * 0.36) * k, String(vv), nf, { bold: true, color: '#0f172a', anchor: 'm' });
-    D.text(c.x, c.y + (ay + 17.2) * k, pctHeavy(mv), 6.6, { color: vv ? '#c2410c' : '#94a3b8', anchor: 'm' });
-    iconBike(D, c.x - 11 * k, c.y + (ay + 28.5) * k, 11 * k, bk ? '#6d28d9' : '#a8a29e');
-    D.text(c.x + 6 * k, c.y + (ay + 28.5 + bf * 0.36) * k, String(bk), bf, { bold: true, color: bk ? '#6d28d9' : '#a8a29e', anchor: 'm' });
+    D.text(c.x, c.y + (ay + 17.2) * k, pctHeavy(mv), 6.6, { color: vv ? PAL.heavy : '#94a3b8', anchor: 'm' });
+    iconBike(D, c.x - 11 * k, c.y + (ay + 28.5) * k, 11 * k, bk ? PAL.bike : '#a8a29e');
+    D.text(c.x + 6 * k, c.y + (ay + 28.5 + bf * 0.36) * k, String(bk), bf, { bold: true, color: bk ? PAL.bike : '#a8a29e', anchor: 'm' });
   };
   var pedBox = function (c, vert, dt, np) {
     var w = vert ? 66 : 150, h = vert ? 150 : 66;
-    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: '#f0fdfa', stroke: '#0f766e', sw: 0.9, r: 8 });
+    D.rect(c.x - w / 2, c.y - h / 2, w, h, { fill: PAL.pedBg, stroke: PAL.pedLn, sw: 1, r: 8 });
     var o1 = vert ? { x: 0, y: -26 * k } : { x: -26 * k, y: 0 }, o2 = vert ? { x: 0, y: -4 * k } : { x: -4 * k, y: 0 }, o3 = vert ? { x: 0, y: 24 * k } : { x: 22 * k, y: 0 };
-    iconPed(D, c.x + o1.x, c.y + o1.y, 12 * k, '#115e59');
-    drawArrow(D, { x: c.x + o2.x, y: c.y + o2.y }, dt, dt, 6 * k, '#115e59', false, 0.8);
+    iconPed(D, c.x + o1.x, c.y + o1.y, 12 * k, PAL.ped);
+    drawArrow(D, { x: c.x + o2.x, y: c.y + o2.y }, dt, dt, 6 * k, PAL.ped, false, 0.8);
     var pf = fitN(np, 11, vert ? 26 : 24);
     D.text(c.x + o3.x, c.y + o3.y + (vert ? 0 : pf * 0.36 * k), String(np), pf, { bold: true, color: '#0f172a', anchor: 'm' });
   };
@@ -1081,9 +1087,9 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
       var off = rw + 10 + Math.abs(sd.x) * w / 2 + Math.abs(sd.y) * h / 2, R = 470;
       var cx = 500 + d.x * R + sd.x * off, cy = 500 + d.y * R + sd.y * off;
       cx = Math.max(w / 2 + 4, Math.min(996 - w / 2, cx)); cy = Math.max(h / 2 + 4, Math.min(996 - h / 2, cy));
-      D.rect(cx - w / 2, cy - h / 2, w, h, { fill: '#0f172a', r: 8 * k });
+      D.rect(cx - w / 2, cy - h / 2, w, h, { fill: PAL.acc, r: 8 * k });
       D.text(cx, cy - 2.4 * k, l1, 8.5, { bold: true, color: '#ffffff', anchor: 'm' });
-      D.text(cx, cy + 9 * k, l2, 8, { bold: true, color: '#fde68a', anchor: 'm' });
+      D.text(cx, cy + 9 * k, l2, 8, { bold: true, color: PAL.accL, anchor: 'm' });
     } else {
       // dense layouts (5+ legs or diagonal legs): one small table per approach
       var ex = legs.filter(function (g) { return g.id !== L.id; }).map(function (g) { return { leg: g, turn: turnOf(L.angle, g.angle), u: false }; }).sort(function (a, b) { return a.turn - b.turn; });
@@ -1092,41 +1098,41 @@ function diagramPage(M, i0, i1, title, lines, mode) {   // mode: 'full' | 'peak'
       var bc = { x: 500 + d.x * 450, y: 500 + d.y * 450 };
       bc.x = Math.max(bwU / 2 + 6, Math.min(994 - bwU / 2, bc.x)); bc.y = Math.max(bhU / 2 + 6, Math.min(994 - bhU / 2, bc.y));
       var x0 = bc.x - bwU / 2, y0 = bc.y - bhU / 2, X = function (p) { return x0 + p * k; }, Y = function (p) { return y0 + p * k; };
-      D.rect(x0, y0, bwU, bhU, { fill: '#ffffff', stroke: '#334155', sw: 0.9, r: 6 * k });
-      D.rect(x0, y0, bwU, 22 * k, { fill: '#0f172a', r: 6 * k });
+      D.rect(x0, y0, bwU, bhU, { fill: '#ffffff', stroke: PAL.line, sw: 1, r: 6 * k });
+      D.rect(x0, y0, bwU, 22 * k, { fill: PAL.acc, r: 6 * k });
       D.text(X(bw / 2), Y(9.5), fitTxt(L.name + ' (' + dirOf(L.angle).n + ')', 8, true, bw - 8), 8, { bold: true, color: '#ffffff', anchor: 'm' });
-      D.text(X(bw / 2), Y(18.5), 'Approach total: ' + ent, 7, { bold: true, color: '#fde68a', anchor: 'm' });
+      D.text(X(bw / 2), Y(18.5), 'Approach total: ' + ent, 7, { bold: true, color: PAL.accL, anchor: 'm' });
       ex.forEach(function (x, j) {
         var mv = V.m[L.id + '>' + x.leg.id], vv = mv ? mv.car + mv.truck : 0, bk = mv ? mv.bike : 0, yc = 26 + j * rh + 6;
-        drawArrow(D, { x: X(9), y: Y(yc) }, hd, uv(x.leg.angle), 3.6 * k, '#1e3a8a', x.u, 0.6);
-        D.text(X(18), Y(yc + 2.6), x.u ? 'U-turn' : cap(turnLabel(x.turn).toLowerCase()), 7, { color: '#334155' });
+        drawArrow(D, { x: X(9), y: Y(yc) }, hd, uv(x.leg.angle), 3.6 * k, PAL.acc, x.u, 0.6);
+        D.text(X(18), Y(yc + 2.6), x.u ? 'U-turn' : turnText(x.turn), 7, { color: '#334155' });
         D.text(X(70), Y(yc + 3), String(vv), fitN(vv, 8.5, 24), { bold: true, color: '#0f172a', anchor: 'r' });
-        D.text(X(73), Y(yc + 2.6), pctHeavy(mv), 5.9, { color: vv ? '#c2410c' : '#94a3b8' });
-        iconBike(D, X(118), Y(yc), 8 * k, bk ? '#6d28d9' : '#a8a29e');
-        D.text(X(123.5), Y(yc + 2.6), String(bk), 7, { bold: true, color: bk ? '#6d28d9' : '#a8a29e' });
+        D.text(X(73), Y(yc + 2.6), pctHeavy(mv), 5.9, { color: vv ? PAL.heavy : '#94a3b8' });
+        iconBike(D, X(118), Y(yc), 8 * k, bk ? PAL.bike : '#a8a29e');
+        D.text(X(123.5), Y(yc + 2.6), String(bk), 7, { bold: true, color: bk ? PAL.bike : '#a8a29e' });
       });
       var yp = 26 + ex.length * rh + 8;
-      iconPed(D, X(9), Y(yp), 9 * k, '#115e59');
-      var ptxt = 'Crossing, walking ' + nbs.map(function (pr) { return DIR_SHORT(walkDir(L.id, pr[0].id)) + ' ' + (V.p[L.id + '>' + pr[0].id] || 0); }).join(' · ');
+      iconPed(D, X(9), Y(yp), 9 * k, PAL.ped);
+      var ptxt = 'Crossing, walking ' + pedSort(L.id, nbs.map(function (pr) { return pr[0]; })).map(function (g) { return [g]; }).map(function (pr) { return DIR_SHORT(walkDir(L.id, pr[0].id)) + ' ' + (V.p[L.id + '>' + pr[0].id] || 0); }).join(' · ');
       D.text(X(18), Y(yp + 2.6), fitTxt(ptxt, 6.6, false, bw - 22), 6.6, { color: '#0f172a' });
     }
   });
-  D.poly([[48, 40], [60, 80], [48, 72], [36, 80]], { fill: '#0f172a' }); D.text(48, 108, 'N', 8, { bold: true, color: '#0f172a', anchor: 'm' });
+  D.poly([[48, 40], [60, 80], [48, 72], [36, 80]], { fill: '#475569' }); D.text(48, 108, 'N', 8, { bold: true, color: '#475569', anchor: 'm' });
 
   // the time period, in the middle of the junction
   var span = hhmm(M.bins[i0].start) + '–' + hhmm(M.bins[i1].start + BIN), cw0 = panel ? 250 : 230, ch0 = panel ? 140 : 150, top0 = -ch0 / 2 * sc;
-  D.rect(500 - cw0 / 2, 500 - ch0 / 2, cw0, ch0, { fill: '#ffffff', stroke: '#0f172a', sw: 1, r: 12 });
+  D.rect(500 - cw0 / 2, 500 - ch0 / 2, cw0, ch0, { fill: '#ffffff', stroke: PAL.acc, sw: 1.5, r: 12 });
   var cl = function (dy, txt, size, o) { D.text(500, 500 + dy * k, txt, size, o); };
-  cl(top0 + 16, mode === 'full' ? 'FULL COUNT' : 'PEAK HOUR', 8, { color: '#64748b', bold: true, anchor: 'm' });
+  cl(top0 + 16, mode === 'full' ? 'FULL COUNT' : 'PEAK HOUR', 8, { color: PAL.acc, bold: true, anchor: 'm' });
   cl(top0 + 38, span, Math.min(19, (cw0 * sc - 14) / tw(span, 1, true)), { bold: true, color: '#0f172a', anchor: 'm' });
   cl(top0 + 52, dayName(S.startedAt) + ' ' + ymd(S.startedAt), 7.5, { color: '#334155', anchor: 'm' });
   if (mode === 'peak' && M.pk && M.pk.phf != null) cl(top0 + 64, 'Peak hour factor ' + M.pk.phf.toFixed(3), 7.5, { color: '#334155', anchor: 'm' });
-  if (mode === 'nopeak') cl(top0 + 64, 'Less than a full hour counted', 7, { color: '#c2410c', bold: true, anchor: 'm' });
+  if (mode === 'nopeak') cl(top0 + 64, 'Less than a full hour counted', 7, { color: PAL.heavy, bold: true, anchor: 'm' });
 
   var ops = D.ops;
-  pageHeader(ops, title, lines);
-  legendOps(28, 98, 128).forEach(function (p) { ops.push(p); });
-  if (S.legs.some(function (l) { return l.removed; })) ops.push({ t: 'text', x: PW - 28, y: 588, s: 'Movements on removed legs are not drawn.', size: 7, color: '#64748b', anchor: 'r' });
+  pageHeader(ops, title, lines, 188);
+  legendOps(28, 106, PW - 56).forEach(function (p) { ops.push(p); });
+  if (S.legs.some(function (l) { return l.removed; })) ops.push({ t: 'text', x: PW - 28, y: PH - 24, s: 'Movements on removed legs are not drawn.', size: 7, color: '#64748b', anchor: 'r' });
   return ops;
 }
 function volumesIn(M, i0, i1) {
@@ -1152,9 +1158,9 @@ function tablePages(M, title, cols, valFn, rowTot) {
   var sum = function (sel) { return cols.map(function (c, j) { return sel.reduce(function (s, r) { return s + r.vals[j]; }, 0); }); };
   var tv = sum(rows), trow = { label: 'Total', vals: tv, tot: rows.reduce(function (s, r) { return s + r.tot; }, 0), bold: true };
   var all = rows.slice(); all.push(trow);
-  if (pk) { var pr = rows.slice(pk.i, pk.i + 4); all.push({ label: 'Peak hour ' + hhmm(pk.start) + '–' + hhmm(pk.end), vals: sum(pr), tot: pr.reduce(function (s, r) { return s + r.tot; }, 0), bold: true, hi: true }); }
-  var firstW = 92, totW = 40, avail = PW - 56 - firstW - totW, cw = Math.min(46, avail / Math.max(1, cols.length)), left = 28;
-  var fs = Math.max(5, Math.min(9, cw / 3.4)), rh = 15, top = 108, perPage = Math.floor((PH - 52 - top) / rh);
+  if (pk) { var pr = rows.slice(pk.i, pk.i + 4); all.push({ label: 'Peak hour', vals: sum(pr), tot: pr.reduce(function (s, r) { return s + r.tot; }, 0), bold: true, hi: true }); }
+  var firstW = multiDay ? 92 : 74, totW = 36, avail = PW - 56 - firstW - totW, cw = Math.min(46, avail / Math.max(1, cols.length)), left = 28;
+  var fs = Math.max(5, Math.min(9, cw / 3.4)), rh = 15, top = 134, perPage = Math.floor((PH - 52 - top) / rh);
   var pages = [], pi = 0;
   do {
     var chunk = all.slice(pi * perPage, (pi + 1) * perPage), ops = [], y = top;
@@ -1164,17 +1170,17 @@ function tablePages(M, title, cols, valFn, rowTot) {
     while (k < cols.length) {
       var h1 = cols[k].h1, span = 1; while (k + span < cols.length && !cols[k + span].h1) span++;
       var wsp = span * cw;
-      ops.push({ t: 'text', x: gx + wsp / 2, y: 78, s: fitTxt(h1 || '', 8, true, wsp - 4), size: 8, bold: true, color: '#0f172a', anchor: 'm' });
-      ops.push({ t: 'line', x1: gx + 1, y1: 82, x2: gx + wsp - 1, y2: 82, stroke: '#64748b', sw: 1 });
+      ops.push({ t: 'text', x: gx + wsp / 2, y: 98, s: fitTxt(h1 || '', 8, true, wsp - 4), size: 8, bold: true, color: PAL.ink, anchor: 'm' });
+      ops.push({ t: 'line', x1: gx + 1, y1: 102, x2: gx + wsp - 1, y2: 102, stroke: PAL.acc, sw: 1.2 });
       gx += wsp; k += span;
     }
     var hs = Math.min(fs, 8.5);
-    cols.forEach(function (c, j) { var s = c.h2; while (tw(s, hs, true) > cw - 2 && s.length > 3) s = s.slice(0, -1); ops.push({ t: 'text', x: left + firstW + j * cw + cw / 2, y: 95, s: s, size: hs, bold: true, color: '#334155', anchor: 'm' }); });
-    ops.push({ t: 'text', x: left, y: 95, s: 'Interval', size: 8.5, bold: true, color: '#334155' });
-    ops.push({ t: 'text', x: left + firstW + cols.length * cw + totW - 4, y: 95, s: 'Total', size: 8.5, bold: true, color: '#334155', anchor: 'r' });
-    ops.push({ t: 'line', x1: left, y1: 100, x2: left + firstW + cols.length * cw + totW, y2: 100, stroke: '#0f172a', sw: 1 });
+    cols.forEach(function (c, j) { var s = c.h2; while (tw(s, hs, true) > cw - 2 && s.length > 3) s = s.slice(0, -1); ops.push({ t: 'text', x: left + firstW + j * cw + cw / 2, y: 115, s: s, size: hs, bold: true, color: '#334155', anchor: 'm' }); });
+    ops.push({ t: 'text', x: left, y: 115, s: 'Interval', size: 8.5, bold: true, color: '#334155' });
+    ops.push({ t: 'text', x: left + firstW + cols.length * cw + totW - 4, y: 115, s: 'Total', size: 8.5, bold: true, color: '#334155', anchor: 'r' });
+    ops.push({ t: 'line', x1: left, y1: 120, x2: left + firstW + cols.length * cw + totW, y2: 120, stroke: PAL.ink, sw: 1 });
     chunk.forEach(function (r) {
-      if (r.hi) ops.push({ t: 'rect', x: left, y: y - 11, w: firstW + cols.length * cw + totW, h: rh, fill: '#fef3c7' });
+      if (r.hi) ops.push({ t: 'rect', x: left, y: y - 11, w: firstW + cols.length * cw + totW, h: rh, fill: PAL.accL });
       ops.push({ t: 'text', x: left + 2, y: y, s: r.label, size: 8.5, bold: r.bold, color: '#0f172a' });
       r.vals.forEach(function (v, j) { ops.push({ t: 'text', x: left + firstW + j * cw + cw / 2, y: y, s: String(v), size: fs, bold: r.bold, color: v ? '#0f172a' : '#94a3b8', anchor: 'm' }); });
       ops.push({ t: 'text', x: left + firstW + cols.length * cw + totW - 4, y: y, s: String(r.tot), size: 9, bold: true, color: '#0f172a', anchor: 'r' });
@@ -1199,8 +1205,8 @@ function buildPdfPages() {
   [['Cars', 'car'], ['Heavy vehicles', 'truck'], ['Bicycles', 'bike']].forEach(function (t) { pages = pages.concat(tablePages(M, t[0] + ' by movement', M.mcols, cell(t[1]), function (b, v) { return sumOf(v); })); });
   pages = pages.concat(tablePages(M, 'Pedestrians by crosswalk', M.pcols, cell('ped'), function (b, v) { return sumOf(v); }));
   pages.forEach(function (ops, i) {
-    ops.push({ t: 'text', x: 28, y: 603, s: foot, size: 8, color: '#94a3b8' });
-    ops.push({ t: 'text', x: 764, y: 603, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
+    ops.push({ t: 'text', x: 28, y: PH - 9, s: foot, size: 8, color: '#94a3b8' });
+    ops.push({ t: 'text', x: PW - 28, y: PH - 9, s: 'Page ' + (i + 1) + ' of ' + pages.length, size: 8, color: '#94a3b8', anchor: 'r' });
   });
   return pages;
 }
@@ -1298,7 +1304,6 @@ function openPdfPreview() {
   var top = can ? '<div class="row"><button class="hb dark" data-a="share">Share / Save PDF</button>' + (CAN_DL ? '<a class="ghost lnk" target="_blank">Open</a>' : '') + '</div>'
     : '<p class="hint"><b>Saving the pages:</b> this iPad (iOS 12) cannot send PDF files from a Home Screen app. Touch and hold a page below, then tap <b>Save Image</b> (to Photos) or <b>Share</b> to email or AirDrop it. The Excel / CSV export has the same numbers as tables.</p>';
   openSheet('Summary PDF preview', top + svgs.map(function (sv, i) { return '<div class="pdfpg" data-pg="' + i + '">' + sv + '</div>'; }).join(''), function (box, sheet) {
-    var sh = $('.sheet', sheet); if (sh) sh.classList.add('wide');
     var a = box.querySelector('a.lnk'); if (a) { try { a.href = URL.createObjectURL(blob); } catch (e) {} }
     box.addEventListener('click', function (e) { var b = e.target.closest('button[data-a]'); if (b) shareOne(it); });
     if (!can) svgs.forEach(function (sv, i) {   // pictures can be touched-and-held to save or share
