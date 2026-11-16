@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '20 (15 Nov 2026)';
+var APP_VERSION = '21 (15 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var uid = function () { return Math.random().toString(36).slice(2, 10); };
 var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -452,8 +452,8 @@ function renderCount() {
   app.innerHTML =
     '<div class="cv"><header class="top"><div class="ti"><div class="site">' + esc(S.site || 'Untitled count') + '</div>' +
     '<div class="sub"><span id="clock"></span></div></div><div class="ivn"><button id="ivprev" class="hb sm">◀</button><b id="binlabel"></b><button id="ivnext" class="hb sm">▶</button><button id="ivlive" class="hb sm live">Live</button></div>' +
-    '<div class="tot"><span class="pill veh">Veh<b id="tv">0</b></span><span class="pill bike">Bike<b id="tb">0</b></span><span class="pill ped">Ped<b id="tp">0</b></span></div>' +
-    '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button><button id="stop" class="hb stop">Stop</button></div>' +
+    '<div class="acts"><button id="notesbtn" class="hb">Notes</button><button id="legsbtn" class="hb">Legs</button><button id="resbtn" class="hb">Results</button><button id="snd" class="hb">' + (soundOn ? '🔊' : '🔇') + '</button></div>' +
+    '<button id="stop" class="hb stop stopr">Stop</button>' +
     '<div id="last" class="last"><div id="lasttxt" class="lt"></div><button id="undo" class="hb">↶ Undo</button><button id="recent" class="hb">Recent</button></div></header>' +
     '<div class="cmain"><aside class="ctl">' +
     (panel ? '' : '<nav class="modes">' + [['veh', 'Vehicles'], ['p', 'Pedestrians']].map(function (m) { return '<button data-mode="' + m[0] + '"' + (mode === m[0] ? ' class="on"' : '') + '>' + m[1] + '</button>'; }).join('') + '</nav>') +
@@ -486,7 +486,6 @@ function tick() {
   var d = new Date(now);
   $('#clock').textContent = hhmm(now) + ':' + pad(d.getSeconds());
   $('#binlabel').textContent = hhmm(c.bs) + '–' + hhmm(c.bs + BIN);
-  $('#tv').textContent = c.tot.v; $('#tb').textContent = c.tot.b; $('#tp').textContent = c.tot.p;
   var left = S.startedAt - now;
   var msg = '';
   if (left > 0) msg = 'Count starts at ' + hhmm(S.startedAt) + ' — in ' + Math.floor(left / 60000) + ':' + pad(Math.floor(left / 1000) % 60);
@@ -806,7 +805,8 @@ function exportModel() {
     var i = active.indexOf(L), n = active.length, nb = [];
     if (i >= 0) nb = [active[(i - 1 + n) % n], active[(i + 1) % n]];
     Object.keys(usedP).forEach(function (k) { var p = k.split('>'); if (p[0] === L.id) { var g = S.legs.filter(function (x) { return x.id === p[1]; })[0]; if (g && nb.indexOf(g) < 0) nb.push(g); } });
-    var first = true;
+    var first = true, PREF = { West: 0, North: 0, Northwest: 0, Northeast: 0, East: 1, South: 1, Southeast: 1, Southwest: 1 };   // same order on every leg: West before East, North before South
+    nb.sort(function (a, b) { var pa = PREF[walkDir(L.id, a.id)], pb = PREF[walkDir(L.id, b.id)]; return (pa == null ? 2 : pa) - (pb == null ? 2 : pb); });
     nb.forEach(function (g) {
       var key = L.id + '>' + g.id; if (seen[key]) return; seen[key] = 1;
       if (!(act[L.id] && act[g.id]) && !usedP[key]) return;

@@ -64,3 +64,7 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v20
 - Pedestrian group headers match the other tables ("Bank Street (N)"). In Bikes and Pedestrians the per-leg column is "Total" and the last column is "Grand total".
+
+## v21
+- Pedestrian columns use one order on every leg (West before East, North before South).
+- Count screen: Veh/Bike/Ped totals removed; Stop is pinned to the far right.
