@@ -98,3 +98,9 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v28
 - Recent / Undo / toast text now describes vehicle and bike movements by direction of travel and turn: SBR, NBL, EBT, WBU, etc. (BL/BR/SL/SR for bear/sharp turns on non-90° legs). Pedestrians unchanged.
+
+## v29
+- Pedestrian entries in Recent/Undo now read e.g. "North leg · EB" (crosswalk leg, walking direction).
+
+## v30
+- Pedestrian entries use the leg's compass side ("North leg · EB"), not its street name.
