@@ -125,3 +125,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v37
 - Heavy (orange, left) and bike (purple, right) bubbles now sit beside the arrow icon instead of on the button corners.
+
+## v38
+- Count buttons: arrow icons are centred in the space between the label and the count, so N/S and E/W legs look the same (bubbles nudged outward to suit).

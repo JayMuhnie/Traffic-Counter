@@ -4,7 +4,7 @@ var TMC = window.TMC, analyze = TMC.analyze, binStart = TMC.binStart, BIN = TMC.
 
 /* ---------- helpers ---------- */
 var LS_CUR = 'tmc.current.v1', LS_HIS = 'tmc.history.v1';
-var APP_VERSION = '37 (16 Nov 2026)';
+var APP_VERSION = '38 (16 Nov 2026)';
 var $ = function (s, r) { return (r || document).querySelector(s); };
 // NOW(): the clock the app uses. Normal counts: the real clock. Test counts (S.test) carry a shift so a few minutes of tapping can stand in for hours.
 var NOW = function () { return Date.now() + (S && S.test ? (S.test.shift || 0) : 0); };
@@ -347,19 +347,27 @@ function renderSetup() {
   tick();
 }
 
-function arrowIcon(h, dt) {   // bent arrow: arrives heading h, leaves heading dt
+function centred(inner, pts, pad) {   // shift an icon so the middle of its bounding box sits at x=0 and the middle of the space between label and count (y=-6)
+  var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  pts.forEach(function (p) { x0 = Math.min(x0, p[0] - pad); x1 = Math.max(x1, p[0] + pad); y0 = Math.min(y0, p[1] - pad); y1 = Math.max(y1, p[1] + pad); });
+  return '<g transform="translate(' + f1(-(x0 + x1) / 2) + ' ' + f1(-6 - (y0 + y1) / 2) + ')">' + inner + '</g>';
+}
+function arrowIcon(h, dt, ctr) {   // bent arrow: arrives heading h, leaves heading dt
   var L = 13, oy = -6, p0 = { x: -h.x * L, y: oy - h.y * L }, p2 = { x: dt.x * L, y: oy + dt.y * L };
   var tip = { x: p2.x + dt.x * 5, y: p2.y + dt.y * 5 }, bx = tip.x - dt.x * 10, by = tip.y - dt.y * 10, qx = -dt.y * 7, qy = dt.x * 7;
-  return '<polyline class="ic" points="' + f1(p0.x) + ',' + f1(p0.y) + ' 0,' + oy + ' ' + f1(p2.x) + ',' + f1(p2.y) + '"/>' +
+  var out = '<polyline class="ic" points="' + f1(p0.x) + ',' + f1(p0.y) + ' 0,' + oy + ' ' + f1(p2.x) + ',' + f1(p2.y) + '"/>' +
     '<polygon class="ich" points="' + f1(tip.x) + ',' + f1(tip.y) + ' ' + f1(bx + qx) + ',' + f1(by + qy) + ' ' + f1(bx - qx) + ',' + f1(by - qy) + '"/>';
+  return ctr ? centred(out, [[p0.x, p0.y], [0, oy], [p2.x, p2.y], [tip.x, tip.y], [bx + qx, by + qy], [bx - qx, by - qy]], 3) : out;
 }
-function uIcon(h) {
-  var a = Math.atan2(-h.x, h.y) * 180 / Math.PI;
-  return '<g transform="translate(0 -2) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
+function uIcon(h, ctr) {
+  var a = Math.atan2(-h.x, h.y) * 180 / Math.PI, g = '<g transform="translate(0 -2) rotate(' + f1(a) + ')"><path class="ic" d="M-9,-14 L-9,2 A9,9 0 0 0 9,2 L9,-6"/><polygon class="ich" points="9,-16 3,-6 15,-6"/></g>';
+  if (!ctr) return g;
+  var c = Math.cos(a * Math.PI / 180), sn = Math.sin(a * Math.PI / 180);
+  return centred(g, [[-9, -14], [-9, 2], [0, 11], [9, 2], [9, -6], [9, -16], [3, -6], [15, -6]].map(function (p) { return [p[0] * c - p[1] * sn, p[0] * sn + p[1] * c - 2]; }), 3);
 }
 function badgeG(k, from, to, cx, cy) {   // small purple bubble: bicycles that made this movement in the current interval
   if (k !== 'v') return '';   // right purple bubble = bicycles, left orange bubble = heavy vehicles (the big number is cars only)
-  var one = function (cls, key, x, y) { return '<g class="bk ' + cls + '" data-bk="' + key + '|' + from + '|' + to + '" visibility="hidden"><circle cx="' + x + '" cy="' + y + '" r="12.5"/><text x="' + x + '" y="' + (y + 5.5) + '">0</text></g>'; };
+  var one = function (cls, key, x, y) { return '<g class="bk ' + cls + '" data-bk="' + key + '|' + from + '|' + to + '" visibility="hidden"><circle cx="' + x + '" cy="' + y + '" r="12"/><text x="' + x + '" y="' + (y + 5.5) + '">0</text></g>'; };
   return one('b', 'b', cx, cy) + one('h', 'h', -cx, cy);
 }
 function mvG(k, from, to, label, icon, x, y, f, extra) {
@@ -368,7 +376,7 @@ function mvG(k, from, to, label, icon, x, y, f, extra) {
     '<rect class="flash" x="-44" y="-44" width="88" height="88" rx="16"/>' +
     '<rect class="rg0" x="-46" y="-46" width="92" height="92" rx="18"/><rect class="rg1" x="-46" y="-46" width="92" height="92" rx="18"/>' +
     '<text class="lb" x="0" y="-27"' + (label.length > 7 ? ' style="font-size:' + Math.max(9, Math.floor(115 / label.length)) + 'px"' : '') + '>' + esc(label) + '</text>' + icon +
-    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text>' + badgeG(k, from, to, 29, 0) + '</g>';
+    '<text class="n" x="0" y="38" data-key="' + k + '|' + from + '|' + to + '">0</text>' + badgeG(k, from, to, 31, 0) + '</g>';
 }
 function flatG(k, from, to, icon, x, y, w, h, extra, vert) {   // flat button: icon then count (side by side, or stacked when vert)
   var hw = w / 2, hh = h / 2;
@@ -390,7 +398,7 @@ function countSVG(legs, md) {
       var sep = 47 / Math.max(Math.abs(t.x), Math.abs(t.y)), rc = cwR(L, legs);
       [[legs[(i - 1 + n) % n], -1], [legs[(i + 1) % n], 1]].forEach(function (pr) {
         var dt = { x: t.x * pr[1], y: t.y * pr[1] };
-        o += mvG('p', L.id, pr[0].id, dirOf((L.angle + (pr[1] > 0 ? 90 : 270)) % 360).f.toUpperCase(), arrowIcon(dt, dt), 500 + d.x * rc + dt.x * sep, 500 + d.y * rc + dt.y * sep, 1, ' pd');
+        o += mvG('p', L.id, pr[0].id, dirOf((L.angle + (pr[1] > 0 ? 90 : 270)) % 360).f.toUpperCase(), arrowIcon(dt, dt, 1), 500 + d.x * rc + dt.x * sep, 500 + d.y * rc + dt.y * sep, 1, ' pd');
       });
     });
   } else {
@@ -404,7 +412,7 @@ function countSVG(legs, md) {
       var m = Math.max(Math.abs(d.x), Math.abs(d.y)), step = (bs + 6) / m, r0 = 122 + (bs / 2 + 2) / m, lat = bs / 2 + 6;
       ex.forEach(function (x, i) {
         var r = r0 + i * step, cx = 500 + d.x * r + right.x * lat, cy = 500 + d.y * r + right.y * lat;
-        o += mvG(k, L.id, x.leg.id, x.u ? 'U-TURN' : turnLabel(x.turn), x.u ? uIcon(hd) : arrowIcon(hd, uv(x.leg.angle)), cx, cy, f, x.u ? ' u' : '');
+        o += mvG(k, L.id, x.leg.id, x.u ? 'U-TURN' : turnLabel(x.turn), x.u ? uIcon(hd, 1) : arrowIcon(hd, uv(x.leg.angle), 1), cx, cy, f, x.u ? ' u' : '');
       });
     });
   }
@@ -425,10 +433,10 @@ function panelSVG(legs) {
     legs.forEach(function (D) {
       if (D.id === L.id) return;
       var tn = turnOf(L.angle, D.angle), lam = tn < 0 ? -113.6 : tn > 0 ? 113.6 : 0, p = at(316.8, lam, right);   // + lam = driver's right
-      o += mvG('v', L.id, D.id, turnLabel(tn), arrowIcon(hd, uv(D.angle)), p.x, p.y, 1.2, '');
+      o += mvG('v', L.id, D.id, turnLabel(tn), arrowIcon(hd, uv(D.angle), 1), p.x, p.y, 1.2, '');
     });
     var pu = at(430.4, -113.6, right);   // same size as the turn buttons, in line with the left-turn column
-    o += mvG('v', L.id, L.id, 'U-TURN', uIcon(hd), pu.x, pu.y, 1.2, ' u');
+    o += mvG('v', L.id, L.id, 'U-TURN', uIcon(hd, 1), pu.x, pu.y, 1.2, ' u');
   });
   return svgWrap(o + COMPASS);
 }
