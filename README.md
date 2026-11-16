@@ -74,3 +74,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 - Verified with an automated test that every count-screen pedestrian and vehicle button lands in the matching table column.
 - Summary PDF is now portrait US Letter (612 x 792 pt), and the preview shows a true letter page. The site name, page title, details and legend are one header band at the top.
 - New diagram palette: light grey-blue roads with white dashes, white movement cards, blue arrows/street names, amber heavy %, violet bikes, green pedestrians.
+
+## v23
+- PDF diagram: simpler palette (greys plus one blue accent); "How to read this page" legend removed.
