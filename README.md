@@ -110,3 +110,6 @@ Intersection turning-movement counter for iPad. Static web app (PWA) — no buil
 
 ## v32
 - Count screen (4-leg layout): turn buttons ~13% larger, crosswalk buttons ~12% larger, wider road to fit.
+
+## v33
+- Count screen: even 8-unit gaps between all buttons; button blocks centred on and sized to the road width.
